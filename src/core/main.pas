@@ -70,7 +70,7 @@ uses
   mainmenu, filemenu, mrumanager, projectframe, mapframe, mapviewerframe,
   overviewmapframe, statusframe, mapgeoref, mapalign, maplocater, mapquery,
   tseriesselector, profileselector, pcntileselector, fireflowselector,
-  groupselector, groupeditor, reportframe;
+  groupselector, groupeditor, reportframe, view3dframe;
 
 const
   crPen  = 101; // Custom pen shaped cursor
@@ -106,6 +106,8 @@ type
     ReportPanel:          TPanel;
     RightReportPanel:     TPanel;
     RightReportSplitter:  TSplitter;
+    View3DPage:           TPage;
+    View3DPanel:          TPanel;
     WindowImageList:      TImageList;
 
     TopPanel:             TPanel;
@@ -166,6 +168,7 @@ type
     MapViewerFrame:        TMapViewerFrame;
     OverviewMapFrame:      TOverviewMapFrame;
     ReportFrame:           TReportFrame;
+    View3DFrame:           TView3DFrame;
     GeoRefFrame:           TGeoRefFrame;
     MapAlignFrame:         TMapAlignFrame;
     LocaterFrame:          TMapLocaterFrame;
@@ -296,6 +299,13 @@ begin
     MapFrame.Parent := MapPanel;
     MapFrame.Align := alClient;
     MapFrame.Init;
+  end;
+  if not Assigned(View3DFrame) then
+  begin
+    View3DFrame := TView3DFrame.Create(self);
+    View3DFrame.Parent := View3DPanel;
+    View3DFrame.Align := alClient;
+    View3DFrame.Init;
   end;
   if not Assigned(MapViewerFrame) then
   begin
@@ -613,7 +623,8 @@ end;
 
 procedure TMainForm.ShowPage(aPage: TPage);
 //
-//  Switch between showing the network Map page and the output Report page.
+//  Switch between showing the network Map page, the output Report page
+//  and the 3D view page.
 //
 begin
   if aPage = MapPage then
@@ -628,7 +639,13 @@ begin
     MapViewerFrame.ReportRadioButton.Enabled := true;
     MapViewerFrame.ReportRadioButton.Checked := true;
     Notebook1.PageIndex := 1;
+  end
+  else if aPage = View3DPage then
+  begin
+    MapViewerFrame.View3DRadioButton.Checked := true;
+    Notebook1.PageIndex := 2;
   end;
+  View3DFrame.SetActive(aPage = View3DPage);
 end;
 
 procedure TMainForm.CheckBounds;
@@ -936,6 +953,8 @@ end;
 procedure TMainForm.StartNewProject;
 begin
   ReportFrame.CloseReport;
+  ShowPage(MapPage);
+  View3DFrame.Clear;
   HideHintPanelFrames;
   project.Clear;
   MapFrame.InitMapOptions;

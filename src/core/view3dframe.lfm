@@ -1,0 +1,149 @@
+object View3DFrame: TView3DFrame
+  Left = 0
+  Height = 480
+  Top = 0
+  Width = 800
+  ClientHeight = 480
+  ClientWidth = 800
+  TabOrder = 0
+  DesignLeft = 347
+  DesignTop = 145
+  object TopPanel: TPanel
+    Left = 0
+    Height = 36
+    Top = 0
+    Width = 800
+    Align = alTop
+    BevelOuter = bvNone
+    ClientHeight = 36
+    ClientWidth = 800
+    TabOrder = 0
+    object BackBtn: TButton
+      Left = 8
+      Height = 26
+      Top = 5
+      Width = 104
+      Align = alLeft
+      BorderSpacing.Left = 8
+      BorderSpacing.Top = 5
+      BorderSpacing.Bottom = 5
+      Caption = '< Network'
+      TabOrder = 0
+      Visible = False
+      OnClick = BackBtnClick
+    end
+    object ValveCombo: TComboBox
+      Left = 120
+      Height = 23
+      Top = 6
+      Width = 150
+      Align = alLeft
+      BorderSpacing.Left = 8
+      BorderSpacing.Top = 6
+      BorderSpacing.Bottom = 6
+      ItemHeight = 15
+      Style = csDropDownList
+      TabOrder = 1
+      OnChange = ValveComboChange
+    end
+    object VertLabel: TLabel
+      Left = 286
+      Height = 36
+      Top = 0
+      Width = 110
+      Align = alLeft
+      AutoSize = False
+      BorderSpacing.Left = 16
+      Caption = 'Vertical scale x1.00'
+      Layout = tlCenter
+      ParentColor = False
+    end
+    object VertTrackBar: TTrackBar
+      Left = 396
+      Height = 28
+      Top = 4
+      Width = 110
+      Max = 16
+      Min = 1
+      PageSize = 1
+      Position = 4
+      TickStyle = tsNone
+      OnChange = VertTrackBarChange
+      Align = alLeft
+      BorderSpacing.Top = 4
+      BorderSpacing.Bottom = 4
+      TabOrder = 2
+    end
+    object SurfaceBox: TCheckBox
+      Left = 518
+      Height = 36
+      Top = 0
+      Width = 109
+      Align = alLeft
+      BorderSpacing.Left = 12
+      Caption = 'Pressure surface'
+      Checked = True
+      State = cbChecked
+      TabOrder = 3
+      OnChange = OptionChange
+    end
+    object FlowBox: TCheckBox
+      Left = 639
+      Height = 36
+      Top = 0
+      Width = 46
+      Align = alLeft
+      BorderSpacing.Left = 12
+      Caption = 'Flow'
+      Checked = True
+      State = cbChecked
+      TabOrder = 4
+      OnChange = OptionChange
+    end
+    object LabelsBox: TCheckBox
+      Left = 697
+      Height = 36
+      Top = 0
+      Width = 54
+      Align = alLeft
+      BorderSpacing.Left = 12
+      Caption = 'Labels'
+      Checked = True
+      State = cbChecked
+      TabOrder = 5
+      OnChange = OptionChange
+    end
+    object ResetBtn: TButton
+      Left = 704
+      Height = 26
+      Top = 5
+      Width = 88
+      Align = alRight
+      BorderSpacing.Top = 5
+      BorderSpacing.Right = 8
+      BorderSpacing.Bottom = 5
+      Caption = 'Reset View'
+      TabOrder = 6
+      OnClick = ResetBtnClick
+    end
+  end
+  object GLPanel: TPanel
+    Left = 0
+    Height = 444
+    Top = 36
+    Width = 800
+    Align = alClient
+    BevelOuter = bvNone
+    Color = 1773581
+    ParentBackground = False
+    ParentColor = False
+    TabOrder = 1
+  end
+  object AnimTimer: TTimer
+    Enabled = False
+    Interval = 16
+    OnTimer = AnimTimerTimer
+    Left = 40
+    Top = 80
+  end
+end

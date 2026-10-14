@@ -48,6 +48,9 @@
         <PackageName Value="TAChartLazarusPkg"/>
       </Item>
       <Item>
+        <PackageName Value="LazOpenGLContext"/>
+      </Item>
+      <Item>
         <PackageName Value="LCL"/>
       </Item>
     </RequiredPackages>
@@ -606,6 +609,13 @@
         <Filename Value="src\core\reportframe.pas"/>
         <IsPartOfProject Value="True"/>
         <ComponentName Value="ReportFrame"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Frame"/>
+      </Unit>
+      <Unit>
+        <Filename Value="src\core\view3dframe.pas"/>
+        <IsPartOfProject Value="True"/>
+        <ComponentName Value="View3DFrame"/>
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Frame"/>
       </Unit>

@@ -20,6 +20,7 @@ unit cmdhandlers;
    set_map_view      - selects map themes, time period, legends, animation
    get_results       - returns node or link values for a theme
    export_geojson    - writes the network and its results to GeoJSON files
+   set_3d_view       - shows the 3D view of the network or of one valve
 }
 
 {$mode objfpc}{$H+}
@@ -35,8 +36,8 @@ implementation
 
 uses
   Forms, Math, StdCtrls, ComCtrls,
-  main, mainmenu, mapviewerframe, project, results, mapthemes, simulator,
-  epanet2, cmdserver, resourcestrings;
+  main, mainmenu, mapviewerframe, view3dframe, project, results, mapthemes,
+  simulator, epanet2, cmdserver, resourcestrings;
 
 const
   DefRowLimit = 50;
@@ -791,6 +792,121 @@ begin
   Result.Add('units', Units);
 end;
 
+function Set3DView(Params: TJSONObject): TJSONObject;
+//
+//  Parameters (all optional):
+//    show            false returns to the map (default is true)
+//    valve           ID of a valve to display in detail; "" for the network
+//    reset           true restores the default camera position
+//    yaw, pitch      camera angles in degrees
+//    zoom            magnification relative to the default view
+//    vertical_scale  exaggeration of elevations and heads (0.25 to 4)
+//    surface, flow, labels   true or false
+//    image           PNG file to save what is on display to
+//
+var
+  View: TView3DFrame;
+  V: TJSONData;
+  Index: Integer;
+  Path: string;
+  Camera: TCamera;
+  Info: TValveInfo;
+  Valve: TJSONObject;
+begin
+  View := MainForm.View3DFrame;
+  Result := TJSONObject.Create;
+  try
+    if not Params.Get('show', true) then
+    begin
+      MainForm.ShowPage(MainForm.MapPage);
+      Result.Add('showing', false);
+      exit;
+    end;
+    MainForm.ShowPage(MainForm.View3DPage);
+    Application.ProcessMessages;   // lets the page get onto the screen
+
+    V := Params.Find('valve');
+    if V <> nil then
+    begin
+      if V.IsNull or (V.AsString = '') then
+        View.ShowNetwork
+      else
+      begin
+        Index := project.GetItemIndex(ctLinks, V.AsString);
+        if (Index < 1) or not View.ShowValve(Index, false) then
+          raise Exception.CreateFmt('"%s" is not a valve', [V.AsString]);
+      end;
+    end;
+
+    if Params.Get('reset', false) then View.ResetView;
+    V := Params.Find('vertical_scale');
+    if V <> nil then View.SetVerticalScale(V.AsFloat);
+    V := Params.Find('surface');
+    if V <> nil then View.SurfaceBox.Checked := V.AsBoolean;
+    V := Params.Find('flow');
+    if V <> nil then View.FlowBox.Checked := V.AsBoolean;
+    V := Params.Find('labels');
+    if V <> nil then View.LabelsBox.Checked := V.AsBoolean;
+    Camera := View.GetCamera;
+    if (Params.Find('yaw') <> nil) or (Params.Find('pitch') <> nil) then
+      View.TurnTo(Params.Get('yaw', Double(Camera.Yaw)),
+        Params.Get('pitch', Double(Camera.Pitch)));
+    V := Params.Find('zoom');
+    if V <> nil then View.ZoomBy(V.AsFloat);
+
+    Path := Params.Get('image', '');
+    if Path <> '' then
+    begin
+      Path := ExpandFileName(Path);
+      if not View.SaveImage(Path) then
+        raise Exception.Create(rs3dNotShowing);
+      Result.Add('image', Path);
+    end;
+
+    Camera := View.GetCamera;
+    Result.Add('showing', true);
+    Result.Add('has_results', project.HasResults);
+    Result.Add('period', mapthemes.TimePeriod);
+    Result.Add('vertical_scale', Num(View.VerticalScale));
+    Result.Add('yaw', Num(Camera.Yaw));
+    Result.Add('pitch', Num(Camera.Pitch));
+    if View.Mode = vmNetwork then
+      Result.Add('view', 'network')
+    else
+    begin
+      Result.Add('view', 'valve');
+      if View.GetValveInfo(View.Valve, Info) then
+      begin
+        Valve := TJSONObject.Create;
+        Valve.Add('id', Info.ID);
+        Valve.Add('type', Info.TypeStr);
+        if Info.HasResults then
+        begin
+          Valve.Add('status', Info.StatusStr);
+          Valve.Add('setting', Num(Info.Setting));
+          Valve.Add('flow', Num(Info.Flow));
+          Valve.Add('velocity', Num(Info.Velocity));
+          Valve.Add('upstream_pressure', Num(Info.PresIn));
+          Valve.Add('downstream_pressure', Num(Info.PresOut));
+          Valve.Add('head_drop', Num(Info.HeadDrop));
+          Valve.Add('power_kw', Num(Info.PowerKW));
+          if Info.LossCoeff >= 0 then
+            Valve.Add('loss_coefficient', Num(Info.LossCoeff));
+          if Info.OpeningKnown then
+          begin
+            Valve.Add('opening_percent', Num(Info.Opening * 100));
+            Valve.Add('opening_is_estimate', Info.OpeningEstimated);
+          end;
+        end;
+        Result.Add('valve', Valve);
+      end;
+    end;
+  except
+    Result.Free;
+    raise;
+  end;
+end;
+
 function ExecuteCommand(const CmdType: string; Params: TJSONObject): TJSONData;
 begin
   if SameText(CmdType, 'ping') then
@@ -812,6 +928,8 @@ begin
     Result := GetResults(Params)
   else if SameText(CmdType, 'export_geojson') then
     Result := ExportGeoJson(Params)
+  else if SameText(CmdType, 'set_3d_view') then
+    Result := Set3DView(Params)
   else
     raise Exception.CreateFmt('unknown command "%s"', [CmdType]);
 end;

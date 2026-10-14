@@ -893,6 +893,29 @@ resourcestring
   rsMsxSave        = 'Save Msx Data';
   rsNoRemotePort   = 'Could not accept remote commands on port %d.';
 
+  // view3dframe.pas
+  rs3dTitle        = 'Hydraulic Grade Line';
+  rs3dNoResults    = 'No simulation results';
+  rs3dRunAnalysis  = 'Select Analyze on the Project menu to run a simulation.';
+  rs3dNetworkHelp  = 'Drag: rotate    Right-drag: pan    Wheel: zoom    ' +
+                     'Click a valve: detail';
+  rs3dValveHelp    = 'Drag: rotate    Wheel: zoom    Esc: back to network';
+  rs3dSelectValve  = 'Select a valve';
+  rs3dUpstream     = 'Upstream';
+  rs3dDownstream   = 'Downstream';
+  rs3dActive       = 'Active';
+  rs3dHeadDrop     = 'Head dropped';
+  rs3dPresDrop     = 'pressure drop across the valve';
+  rs3dPower        = 'Power dissipated';
+  rs3dEnergy       = 'Energy dissipated';
+  rs3dOpening      = 'Opening';
+  rs3dEstimated    = 'estimated';
+  rs3dLossCoeff    = 'Loss coefficient';
+  rs3dSchematic    = 'Schematic. Flow, pressures and status are simulation ' +
+                     'results; the flow pattern inside the valve is not modelled.';
+  rs3dOpeningNote  = 'The opening is estimated from the head loss.';
+  rs3dNotShowing   = 'The 3D view is not showing.';
+
   // about.pas
   rsVersions       = 'EPANET-UI Version 1.0.4' + LineEnding + LineEnding +
                      'OWA-EPANET Version 2.3.6' + LineEnding + LineEnding +

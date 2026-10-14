@@ -284,6 +284,18 @@ object mainForm: TmainForm
           ResizeAnchor = akRight
         end
       end
+      object View3DPage: TPage
+        object View3DPanel: TPanel
+          Left = 0
+          Height = 567
+          Top = 0
+          Width = 585
+          Align = alClient
+          BevelOuter = bvNone
+          ParentBackground = False
+          TabOrder = 0
+        end
+      end
     end
   end
   object Leftpanel: TPanel

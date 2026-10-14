@@ -38,6 +38,7 @@ type
     TimeLabel:      TLabel;
     MapRadioButton:     TRadioButton;
     ReportRadioButton:  TRadioButton;
+    View3DRadioButton:  TRadioButton;
     EditLinkLegendBtn:  TSpeedButton;
     EditNodeLegendBtn:  TSpeedButton;
     BasemapBox:         TCheckBox;
@@ -153,8 +154,11 @@ procedure TMapViewerFrame.MapRadioButtonClick(Sender: TObject);
 begin
   if MapRadioButton.Checked then
     MainForm.Notebook1.PageIndex := 0
+  else if ReportRadioButton.Checked then
+    MainForm.Notebook1.PageIndex := 1
   else
-    MainForm.Notebook1.PageIndex := 1;
+    MainForm.Notebook1.PageIndex := 2;
+  MainForm.View3DFrame.SetActive(View3DRadioButton.Checked);
 end;
 
 procedure TMapViewerFrame.NodeLegendBoxChange(Sender: TObject);

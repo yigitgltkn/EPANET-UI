@@ -94,13 +94,23 @@ object MapViewerFrame: TMapViewerFrame
             OnClick = MapRadioButtonClick
           end
           object ReportRadioButton: TRadioButton
-            Left = 86
+            Left = 68
             Height = 19
             Top = 6
             Width = 53
             Caption = 'Report'
             ParentFont = False
             TabOrder = 1
+            OnClick = MapRadioButtonClick
+          end
+          object View3DRadioButton: TRadioButton
+            Left = 140
+            Height = 19
+            Top = 6
+            Width = 34
+            Caption = '3D'
+            ParentFont = False
+            TabOrder = 2
             OnClick = MapRadioButtonClick
           end
         end

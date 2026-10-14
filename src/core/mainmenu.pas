@@ -536,6 +536,7 @@ begin
       MainForm.UpdateStatusBar(sbResults, rsNoResults);
     end;
     MainForm.ProjectFrame.UpdateResultsDisplay;
+    MainForm.View3DFrame.RefreshScene;
     if project.SimStatus in [ssFailed, ssError, ssWarning] then
     begin
       MainForm.ReportFrame.CloseReport;

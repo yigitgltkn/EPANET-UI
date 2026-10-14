@@ -15,7 +15,7 @@ unit results;
 interface
 
 uses
-  Classes, SysUtils, project;
+  Classes, SysUtils, Types, project;
 
 var
   QualFlag:    Integer;
@@ -46,6 +46,9 @@ function  GetLinkValue(const I: Integer; const V: Integer; const T: Integer): Si
 function  GetLinkLeakageValue(const I: Integer; const T: Integer): Single;
 function  GetLinkEnergyValue(const I: Integer; const T: Integer): Single;
 function  GetLinkMsxValue(const I: Integer; const V: Integer; const T: Integer): Single;
+
+procedure GetNodeValues(const V: Integer; const T: Integer; var Values: TSingleDynArray);
+procedure GetLinkValues(const V: Integer; const T: Integer; var Values: TSingleDynArray);
 
 function  GetPumpEnergy(const I: Integer; var PumpEnergy: array of Single): Boolean;
 function  GetPumpDemandCharge: Single;
@@ -483,6 +486,38 @@ begin
        (I-1)*RECORDSIZE;                         // Results for prior links
   Fmsx.Seek(P, soBeginning);
   Fmsx.Read(Result, SizeOf(Single));
+end;
+
+procedure GetNodeValues(const V: Integer; const T: Integer;
+  var Values: TSingleDynArray);
+//
+// Read variable V of every node in time period T with one file access.
+// Values[K] belongs to the node whose result index is K + 1.
+//
+var
+  P: Int64;
+begin
+  SetLength(Values, Nnodes);
+  if Nnodes = 0 then exit;
+  P := Offset3 + T * BlockSize1 + Int64(V) * Nnodes * RECORDSIZE;
+  Fout.Seek(P, soBeginning);
+  Fout.Read(Values[0], Nnodes * RECORDSIZE);
+end;
+
+procedure GetLinkValues(const V: Integer; const T: Integer;
+  var Values: TSingleDynArray);
+//
+// Read variable V of every link in time period T with one file access.
+// Values[K] belongs to the link whose result index is K + 1.
+//
+var
+  P: Int64;
+begin
+  SetLength(Values, Nlinks);
+  if Nlinks = 0 then exit;
+  P := Offset3 + T * BlockSize1 + BlockSize2 + Int64(V) * Nlinks * RECORDSIZE;
+  Fout.Seek(P, soBeginning);
+  Fout.Read(Values[0], Nlinks * RECORDSIZE);
 end;
 
 function GetPumpEnergy(const I: Integer; var PumpEnergy: array of Single): Boolean;
