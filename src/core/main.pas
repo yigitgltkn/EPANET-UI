@@ -992,6 +992,11 @@ begin
       begin
         ReportFrame.CloseReport;
         project.RemoveResults;
+
+        // There are no time periods left for the Map Viewer to step through
+        MapViewerFrame.AnimateBtn.Checked := false;
+        MapViewerFrame.AnimationTimer.Enabled := false;
+        MapViewerFrame.InitTimeGroupBox(0);
         MapFrame.RedrawMap;
       end;
       with ProjectFrame do
