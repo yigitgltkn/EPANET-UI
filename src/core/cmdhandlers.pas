@@ -1,0 +1,824 @@
+{====================================================================
+ Project:      EPANET-UI
+ Module:       cmdhandlers
+ Description:  implements the commands that external programs can
+               send to the application through the cmdserver unit
+ License:      see LICENSE
+=====================================================================}
+
+unit cmdhandlers;
+
+{
+ Each command acts through the same forms and frames a user would use,
+ so the display always reflects what a command has done.
+
+ Commands:
+   ping              - identifies the application
+   get_project_info  - describes the project that is open
+   open_project      - opens an EPANET input file
+   run_analysis      - runs a simulation
+   set_map_view      - selects map themes, time period, legends, animation
+   get_results       - returns node or link values for a theme
+   export_geojson    - writes the network and its results to GeoJSON files
+}
+
+{$mode objfpc}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, fpjson;
+
+function ExecuteCommand(const CmdType: string; Params: TJSONObject): TJSONData;
+
+implementation
+
+uses
+  Forms, Math, StdCtrls, ComCtrls,
+  main, mainmenu, mapviewerframe, project, results, mapthemes, simulator,
+  epanet2, cmdserver, resourcestrings;
+
+const
+  DefRowLimit = 50;
+  MaxRowLimit = 5000;
+  MaxReportChars = 4000;
+
+  NodeTypeStr: array[ntJunction..ntTank] of string =
+    ('Junction', 'Reservoir', 'Tank');
+  LinkTypeStr: array[ltCVPipe..ltValve] of string =
+    ('Pipe', 'Pipe', 'Pump', 'Valve');
+  SimStatusStr: array[TSimStatus] of string =
+    ('success', 'warning', 'error', 'wrong_version', 'failed', 'shutdown',
+     'cancelled', 'none');
+  ResultsStatusStr: array[rsNotAvailable..rsNeedsUpdating] of string =
+    ('none', 'current', 'needs_update');
+
+type
+  // A floating point value written with a few significant digits
+  TCompactFloat = class(TJSONFloatNumber)
+  protected
+    function GetAsJSON: TJSONStringType; override;
+  end;
+
+  TRow = record
+    Index: Integer;
+    Value: Double;
+  end;
+  TRows = array of TRow;
+
+var
+  JsonFormat: TFormatSettings;
+
+function TCompactFloat.GetAsJSON: TJSONStringType;
+begin
+  if IsNan(AsFloat) or IsInfinite(AsFloat) then
+    Result := 'null'
+  else
+    Result := FloatToStrF(AsFloat, ffGeneral, 6, 0, JsonFormat);
+end;
+
+function Num(Value: Double): TJSONData;
+begin
+  Result := TCompactFloat.Create(Value);
+end;
+
+procedure CheckReady;
+//
+//  State-changing commands are refused while the user is in the middle
+//  of an operation that disables the main menu.
+//
+begin
+  if not MainForm.MainMenuFrame.Enabled then
+    raise Exception.Create(
+      'EPANET-UI is busy with another operation; finish or cancel it first');
+end;
+
+function ThemeNames(Items: TStrings): TJSONArray;
+var
+  I: Integer;
+begin
+  Result := TJSONArray.Create;
+  for I := 1 to Items.Count - 1 do   // item 0 is the 'None' theme
+    Result.Add(Items[I]);
+end;
+
+function FindTheme(Items: TStrings; Value: TJSONData; const What: string): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  if Value.JSONType = jtNumber then
+    Result := Value.AsInteger
+  else for I := 0 to Items.Count - 1 do
+    if SameText(Trim(Items[I]), Trim(Value.AsString)) then
+    begin
+      Result := I;
+      break;
+    end;
+  if (Result < 0) or (Result >= Items.Count) then
+    raise Exception.CreateFmt('unknown %s theme "%s"; available themes: %s',
+      [What, Value.AsString, Items.CommaText]);
+end;
+
+function ItemText(Combo: TComboBox): string;
+begin
+  if Combo.ItemIndex >= 0 then
+    Result := Combo.Items[Combo.ItemIndex]
+  else
+    Result := '';
+end;
+
+function ViewInfo: TJSONObject;
+var
+  Viewer: TMapViewerFrame;
+begin
+  Viewer := MainForm.MapViewerFrame;
+  Result := TJSONObject.Create;
+  Result.Add('node_theme', ItemText(Viewer.ViewNodeCombo));
+  Result.Add('link_theme', ItemText(Viewer.ViewLinkCombo));
+  Result.Add('period', mapthemes.TimePeriod);
+  if project.HasResults then
+    Result.Add('time', results.GetTimeStr(mapthemes.TimePeriod));
+  Result.Add('animating', Viewer.AnimateBtn.Checked);
+end;
+
+function Ping: TJSONObject;
+var
+  Version: Integer = 0;
+begin
+  epanet2.ENgetversion(Version);
+  Result := TJSONObject.Create;
+  Result.Add('app', Copy(rsVersions, 1, Pos(LineEnding, rsVersions) - 1));
+  Result.Add('engine_version', Version);
+  Result.Add('port', cmdserver.GetPort);
+  Result.Add('project', project.InpFile);
+  Result.Add('dialog_open', Application.ModalLevel > 0);
+end;
+
+function GetProjectInfo: TJSONObject;
+var
+  I: Integer;
+  NodeCounts: array[ntJunction..ntTank] of Integer = (0, 0, 0);
+  LinkCounts: array[ltCVPipe..ltValve] of Integer = (0, 0, 0, 0);
+  Counts, Sim: TJSONObject;
+  Viewer: TMapViewerFrame;
+begin
+  for I := 1 to project.GetItemCount(ctNodes) do
+    Inc(NodeCounts[EnsureRange(project.GetNodeType(I), ntJunction, ntTank)]);
+  for I := 1 to project.GetItemCount(ctLinks) do
+    Inc(LinkCounts[EnsureRange(project.GetLinkType(I), ltCVPipe, ltValve)]);
+
+  Counts := TJSONObject.Create;
+  Counts.Add('junctions', NodeCounts[ntJunction]);
+  Counts.Add('reservoirs', NodeCounts[ntReservoir]);
+  Counts.Add('tanks', NodeCounts[ntTank]);
+  Counts.Add('pipes', LinkCounts[ltCVPipe] + LinkCounts[ltPipe]);
+  Counts.Add('pumps', LinkCounts[ltPump]);
+  Counts.Add('valves', LinkCounts[ltValve]);
+
+  Sim := TJSONObject.Create;
+  Sim.Add('has_results', project.HasResults);
+  Sim.Add('results_status', ResultsStatusStr[EnsureRange(project.ResultsStatus,
+    rsNotAvailable, rsNeedsUpdating)]);
+  if project.HasResults then
+  begin
+    Sim.Add('periods', results.Nperiods);
+    Sim.Add('first_time', results.GetTimeStr(0));
+    Sim.Add('last_time', results.GetTimeStr(results.Nperiods - 1));
+  end;
+
+  Viewer := MainForm.MapViewerFrame;
+  Result := TJSONObject.Create;
+  Result.Add('file', project.InpFile);
+  Result.Add('title', Trim(project.GetTitle(0)));
+  Result.Add('has_unsaved_changes', project.HasChanged);
+  Result.Add('counts', Counts);
+  Result.Add('flow_units', project.FlowUnitsStr[project.FlowUnits]);
+  Result.Add('pressure_units', project.PressureUnitsStr[project.PressureUnits]);
+  Result.Add('head_loss_model', project.GetHlossModelStr);
+  Result.Add('demand_model', project.GetDemandModelStr);
+  Result.Add('quality_model', project.GetQualModelStr);
+  Result.Add('map_units', project.MapUnitsStr[project.MapUnits]);
+  Result.Add('map_epsg', project.MapEPSG);
+  Result.Add('has_web_basemap', MainForm.MapFrame.HasWebBasemap);
+  Result.Add('simulation', Sim);
+  Result.Add('node_themes', ThemeNames(Viewer.ViewNodeCombo.Items));
+  Result.Add('link_themes', ThemeNames(Viewer.ViewLinkCombo.Items));
+  Result.Add('view', ViewInfo);
+end;
+
+function OpenProject(Params: TJSONObject): TJSONObject;
+var
+  Path: string;
+begin
+  CheckReady;
+  Path := Params.Get('path', '');
+  if Path = '' then
+    raise Exception.Create('missing "path" parameter');
+  if not FileExists(Path) then
+    raise Exception.CreateFmt('file not found: %s', [Path]);
+  if project.HasChanged and not Params.Get('discard_changes', false) then
+    raise Exception.Create('the open project has unsaved changes; save it ' +
+      'in EPANET-UI or send "discard_changes": true');
+
+  MainForm.OpenFile(Path);
+  if project.InpFile = '' then
+    raise Exception.CreateFmt('EPANET-UI could not load %s', [Path]);
+  Result := GetProjectInfo;
+end;
+
+function ReadReport: string;
+//
+//  The status report that the engine wrote for the last run.
+//
+var
+  Lines: TStringList;
+begin
+  Result := '';
+  if not FileExists(project.AuxFile) then exit;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(project.AuxFile);
+    Result := Trim(Lines.Text);
+    if Length(Result) > MaxReportChars then
+      Result := Copy(Result, 1, MaxReportChars) + LineEnding + '...';
+  finally
+    Lines.Free;
+  end;
+end;
+
+function RunAnalysis: TJSONObject;
+begin
+  CheckReady;
+  if project.GetItemCount(ctNodes) = 0 then
+    raise Exception.Create('no network is loaded');
+
+  // Run through the Analyze button so the display is updated as usual
+  simulator.CloseWhenDone := true;
+  try
+    MainForm.MainMenuFrame.ProjectAnalyzeBtnClick(nil);
+  finally
+    simulator.CloseWhenDone := false;
+  end;
+
+  Result := TJSONObject.Create;
+  Result.Add('status', SimStatusStr[project.SimStatus]);
+  Result.Add('has_results', project.HasResults);
+  if project.HasResults then
+  begin
+    Result.Add('periods', results.Nperiods);
+    Result.Add('first_time', results.GetTimeStr(0));
+    Result.Add('last_time', results.GetTimeStr(results.Nperiods - 1));
+  end;
+  if project.SimStatus <> ssSuccess then
+    Result.Add('status_report', ReadReport);
+end;
+
+procedure SetPeriod(Period: Integer);
+var
+  Viewer: TMapViewerFrame;
+begin
+  if not project.HasResults then
+    raise Exception.Create('no simulation results are available');
+  if (Period < 0) or (Period >= results.Nperiods) then
+    raise Exception.CreateFmt('period must be between 0 and %d',
+      [results.Nperiods - 1]);
+  Viewer := MainForm.MapViewerFrame;
+  Viewer.TimeTrackBar.Position := Period;
+  Viewer.TimeTrackBar.Tag := 1;      // as if the slider had been released
+  Viewer.TimeTrackBarChange(nil);
+end;
+
+function SetMapView(Params: TJSONObject): TJSONObject;
+var
+  Viewer: TMapViewerFrame;
+  V: TJSONData;
+begin
+  Viewer := MainForm.MapViewerFrame;
+  MainForm.ShowPage(MainForm.MapPage);
+
+  V := Params.Find('node_theme');
+  if V <> nil then
+  begin
+    Viewer.ViewNodeCombo.ItemIndex :=
+      FindTheme(Viewer.ViewNodeCombo.Items, V, 'node');
+    Viewer.ViewNodeComboChange(nil);
+  end;
+
+  V := Params.Find('link_theme');
+  if V <> nil then
+  begin
+    Viewer.ViewLinkCombo.ItemIndex :=
+      FindTheme(Viewer.ViewLinkCombo.Items, V, 'link');
+    Viewer.ViewLinkComboChange(nil);
+  end;
+
+  V := Params.Find('period');
+  if V <> nil then SetPeriod(V.AsInteger);
+
+  V := Params.Find('node_legend');
+  if (V <> nil) and Viewer.NodeLegendBox.Enabled then
+  begin
+    Viewer.NodeLegendBox.Checked := V.AsBoolean;
+    Viewer.NodeLegendBoxChange(nil);
+  end;
+
+  V := Params.Find('link_legend');
+  if (V <> nil) and Viewer.LinkLegendBox.Enabled then
+  begin
+    Viewer.LinkLegendBox.Checked := V.AsBoolean;
+    Viewer.LinkLegendBoxChange(nil);
+  end;
+
+  V := Params.Find('animate');
+  if (V <> nil) and Viewer.AnimateBtn.Enabled then
+  begin
+    Viewer.AnimateBtn.Checked := V.AsBoolean;
+    Viewer.AnimateBtnChange(nil);
+  end;
+
+  Result := ViewInfo;
+end;
+
+procedure SortRows(var Rows: TRows; L, R: Integer; Descending: Boolean);
+var
+  I, J: Integer;
+  Pivot: Double;
+  Tmp: TRow;
+begin
+  if L >= R then exit;
+  I := L;
+  J := R;
+  Pivot := Rows[(L + R) div 2].Value;
+  repeat
+    if Descending then
+    begin
+      while Rows[I].Value > Pivot do Inc(I);
+      while Rows[J].Value < Pivot do Dec(J);
+    end
+    else
+    begin
+      while Rows[I].Value < Pivot do Inc(I);
+      while Rows[J].Value > Pivot do Dec(J);
+    end;
+    if I <= J then
+    begin
+      Tmp := Rows[I];
+      Rows[I] := Rows[J];
+      Rows[J] := Tmp;
+      Inc(I);
+      Dec(J);
+    end;
+  until I > J;
+  SortRows(Rows, L, J, Descending);
+  SortRows(Rows, I, R, Descending);
+end;
+
+function GetResults(Params: TJSONObject): TJSONObject;
+//
+//  Parameters:
+//    category  "nodes" or "links"
+//    theme     a theme name listed by get_project_info
+//    period    time period (default is the one shown on the map)
+//    types     optional list of object types to consider, e.g. ["Junction"]
+//    ids       optional list of object IDs to report
+//    below, above   optional limits a value must be under / over
+//    sort      "asc" or "desc" (default is network order)
+//    limit     most rows to return (default 50)
+//
+var
+  Category, Theme, Period, Count, I, N, Limit: Integer;
+  CategoryStr, SortStr, ID: string;
+  Combo: TComboBox;
+  V, Ids: TJSONData;
+  Value, Sum, Below, Above: Double;
+  HasBelow, HasAbove: Boolean;
+  All, Rows: TRows;
+  MinRow, MaxRow: Integer;
+  Wanted, Types: TStringList;
+  Stats, Row: TJSONObject;
+  RowArray, NotFound: TJSONArray;
+
+  function ValueOf(Index: Integer): Double;
+  begin
+    if Category = ctNodes then
+      Result := mapthemes.GetNodeValue(Index, Theme, Period)
+    else
+      Result := mapthemes.GetLinkValue(Index, Theme, Period);
+  end;
+
+  function TypeOf(Index: Integer): string;
+  begin
+    if Category = ctNodes then
+      Result := NodeTypeStr[EnsureRange(project.GetNodeType(Index),
+        ntJunction, ntTank)]
+    else
+      Result := LinkTypeStr[EnsureRange(project.GetLinkType(Index),
+        ltCVPipe, ltValve)];
+  end;
+
+begin
+  CategoryStr := Params.Get('category', 'nodes');
+  if SameText(CategoryStr, 'nodes') then
+  begin
+    Category := ctNodes;
+    Combo := MainForm.MapViewerFrame.ViewNodeCombo;
+  end
+  else if SameText(CategoryStr, 'links') then
+  begin
+    Category := ctLinks;
+    Combo := MainForm.MapViewerFrame.ViewLinkCombo;
+  end
+  else
+    raise Exception.Create('"category" must be "nodes" or "links"');
+
+  V := Params.Find('theme');
+  if V = nil then
+    raise Exception.Create('missing "theme" parameter');
+  Theme := FindTheme(Combo.Items, V, CategoryStr);
+  if Theme = 0 then
+    raise Exception.Create('choose a theme other than None');
+
+  Period := Params.Get('period', mapthemes.TimePeriod);
+  if project.HasResults
+  and ((Period < 0) or (Period >= results.Nperiods)) then
+    raise Exception.CreateFmt('period must be between 0 and %d',
+      [results.Nperiods - 1]);
+
+  HasBelow := Params.Find('below') <> nil;
+  HasAbove := Params.Find('above') <> nil;
+  Below := Params.Get('below', 0.0);
+  Above := Params.Get('above', 0.0);
+  SortStr := Params.Get('sort', '');
+  Limit := EnsureRange(Params.Get('limit', DefRowLimit), 1, MaxRowLimit);
+
+  // Collect every object of the wanted types that has a value for the theme
+  Types := nil;
+  V := Params.Find('types');
+  if V is TJSONArray then
+  begin
+    Types := TStringList.Create;
+    for I := 0 to TJSONArray(V).Count - 1 do
+      Types.Add(TJSONArray(V).Items[I].AsString);
+  end;
+  Count := project.GetItemCount(Category);
+  SetLength(All, Count);
+  N := 0;
+  Sum := 0;
+  MinRow := -1;
+  MaxRow := -1;
+  try
+    for I := 1 to Count do
+    begin
+      if (Types <> nil) and (Types.IndexOf(TypeOf(I)) < 0) then continue;
+      Value := ValueOf(I);
+      if Value = MISSING then continue;
+      All[N].Index := I;
+      All[N].Value := Value;
+      Sum := Sum + Value;
+      if (MinRow < 0) or (Value < All[MinRow].Value) then MinRow := N;
+      if (MaxRow < 0) or (Value > All[MaxRow].Value) then MaxRow := N;
+      Inc(N);
+    end;
+  finally
+    Types.Free;
+  end;
+  SetLength(All, N);
+  if N = 0 then
+  begin
+    if (Category = ctNodes) and (Theme >= FirstNodeResultTheme)
+    or (Category = ctLinks) and (Theme >= FirstLinkResultTheme) then
+      raise Exception.Create('no values found; if the theme is a ' +
+        'simulation result, run an analysis first')
+    else
+      raise Exception.Create('no ' + CategoryStr + ' of the requested ' +
+        'types were found');
+  end;
+
+  Stats := TJSONObject.Create;
+  Stats.Add('min', Num(All[MinRow].Value));
+  Stats.Add('min_id', project.GetID(Category, All[MinRow].Index));
+  Stats.Add('max', Num(All[MaxRow].Value));
+  Stats.Add('max_id', project.GetID(Category, All[MaxRow].Index));
+  Stats.Add('mean', Num(Sum / N));
+
+  // Keep only the objects that were asked for
+  NotFound := TJSONArray.Create;
+  Wanted := nil;
+  Ids := Params.Find('ids');
+  if Ids is TJSONArray then
+  begin
+    Wanted := TStringList.Create;
+    Wanted.Sorted := true;
+    Wanted.Duplicates := dupIgnore;
+    for I := 0 to TJSONArray(Ids).Count - 1 do
+    begin
+      ID := TJSONArray(Ids).Items[I].AsString;
+      if project.GetItemIndex(Category, ID) > 0 then
+        Wanted.Add(ID)
+      else
+        NotFound.Add(ID);
+    end;
+  end;
+  try
+    SetLength(Rows, N);
+    Count := 0;
+    for I := 0 to N - 1 do
+    begin
+      if HasBelow and not (All[I].Value < Below) then continue;
+      if HasAbove and not (All[I].Value > Above) then continue;
+      if (Wanted <> nil)
+      and (Wanted.IndexOf(project.GetID(Category, All[I].Index)) < 0) then
+        continue;
+      Rows[Count] := All[I];
+      Inc(Count);
+    end;
+    SetLength(Rows, Count);
+  finally
+    Wanted.Free;
+  end;
+
+  if SameText(SortStr, 'asc') then
+    SortRows(Rows, 0, Count - 1, false)
+  else if SameText(SortStr, 'desc') then
+    SortRows(Rows, 0, Count - 1, true);
+
+  RowArray := TJSONArray.Create;
+  for I := 0 to Min(Count, Limit) - 1 do
+  begin
+    Row := TJSONObject.Create;
+    Row.Add('id', project.GetID(Category, Rows[I].Index));
+    Row.Add('type', TypeOf(Rows[I].Index));
+    Row.Add('value', Num(Rows[I].Value));
+    RowArray.Add(Row);
+  end;
+
+  Result := TJSONObject.Create;
+  Result.Add('category', LowerCase(CategoryStr));
+  Result.Add('theme', Combo.Items[Theme]);
+  Result.Add('units', mapthemes.GetThemeUnits(Category, Theme));
+  Result.Add('period', Period);
+  if project.HasResults then
+    Result.Add('time', results.GetTimeStr(Period));
+  Result.Add('total', N);
+  Result.Add('stats', Stats);
+  Result.Add('matched', Count);
+  Result.Add('returned', RowArray.Count);
+  Result.Add('rows', RowArray);
+  if NotFound.Count > 0 then
+    Result.Add('ids_not_found', NotFound)
+  else
+    NotFound.Free;
+end;
+
+function FieldName(const ThemeName: string): string;
+//
+//  Attribute name for a theme, e.g. 'Base Demand' becomes 'base_demand'.
+//
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := '';
+  for I := 1 to Length(ThemeName) do
+  begin
+    C := ThemeName[I];
+    if C in ['A'..'Z'] then
+      Result := Result + Chr(Ord(C) + 32)
+    else if C in ['a'..'z', '0'..'9'] then
+      Result := Result + C
+    else if (Result <> '') and (Result[Length(Result)] <> '_') then
+      Result := Result + '_';
+  end;
+  while (Result <> '') and (Result[Length(Result)] = '_') do
+    SetLength(Result, Length(Result) - 1);
+end;
+
+function JsonValue(Value: Double): string;
+begin
+  if (Value = MISSING) or IsNan(Value) or IsInfinite(Value) then
+    Result := 'null'
+  else
+    Result := FloatToStrF(Value, ffGeneral, 6, 0, JsonFormat);
+end;
+
+function JsonText(const S: string): string;
+begin
+  Result := '"' + StringToJSONString(S) + '"';
+end;
+
+function JsonCoord(X, Y: Double): string;
+begin
+  Result := '[' + FloatToStr(X, JsonFormat) + ',' +
+    FloatToStr(Y, JsonFormat) + ']';
+end;
+
+function ExportGeoJson(Params: TJSONObject): TJSONObject;
+//
+//  Writes <name>_nodes.geojson and <name>_links.geojson, in the map's
+//  coordinate system, with one attribute per map theme.
+//
+//  Parameters:
+//    folder   where to write the files (default is a 'qgis' folder
+//             beside the project's input file)
+//    period   time period the result values are taken from (default is
+//             the one shown on the map)
+//
+var
+  Folder, BaseName, Header, Props, Coords, NodesFile, LinksFile: string;
+  Period, Epsg, I, K, N1, N2, NodeCount, LinkCount, Skipped: Integer;
+  X, Y: Double;
+  NodeItems, LinkItems: TStrings;
+  Lines: TStringList;
+  Fields, Units: TJSONObject;
+  FieldList: TJSONArray;
+
+  function FileHeader(const LayerName: string): string;
+  begin
+    Result := '{"type":"FeatureCollection","name":' + JsonText(LayerName);
+    if Epsg > 0 then
+      Result := Result + ',"crs":{"type":"name","properties":{"name":' +
+        '"urn:ogc:def:crs:EPSG::' + IntToStr(Epsg) + '"}}';
+    Result := Result + ',"features":[';
+  end;
+
+  procedure AddFeature(const Properties, Geometry: string);
+  var
+    S: string;
+  begin
+    S := '{"type":"Feature","properties":{' + Properties + '},"geometry":' +
+      Geometry + '}';
+    if Lines.Count > 1 then S := ',' + S;
+    Lines.Add(S);
+  end;
+
+  procedure DescribeFields(Category: Integer; Items: TStrings;
+    const Key: string);
+  var
+    T: Integer;
+    CategoryUnits: TJSONObject;
+  begin
+    // Node and link themes can share a name, so units are listed per layer
+    FieldList := TJSONArray.Create;
+    CategoryUnits := TJSONObject.Create;
+    for T := 1 to Items.Count - 1 do
+    begin
+      FieldList.Add(FieldName(Items[T]));
+      if CategoryUnits.Find(FieldName(Items[T])) = nil then
+        CategoryUnits.Add(FieldName(Items[T]),
+          mapthemes.GetThemeUnits(Category, T));
+    end;
+    Fields.Add(Key, FieldList);
+    Units.Add(Key, CategoryUnits);
+  end;
+
+begin
+  if project.GetItemCount(ctNodes) = 0 then
+    raise Exception.Create('no network is loaded');
+
+  Folder := Params.Get('folder', '');
+  if Folder = '' then
+  begin
+    if project.InpFile = '' then
+      raise Exception.Create('the project has not been saved; ' +
+        'send a "folder" to write the files to');
+    Folder := ExtractFilePath(ExpandFileName(project.InpFile)) + 'qgis';
+  end;
+  Folder := ExcludeTrailingPathDelimiter(ExpandFileName(Folder));
+  if not ForceDirectories(Folder) then
+    raise Exception.CreateFmt('could not create folder %s', [Folder]);
+
+  if project.InpFile <> '' then
+    BaseName := ChangeFileExt(ExtractFileName(project.InpFile), '')
+  else
+    BaseName := 'network';
+  NodesFile := Folder + PathDelim + BaseName + '_nodes.geojson';
+  LinksFile := Folder + PathDelim + BaseName + '_links.geojson';
+
+  Period := Params.Get('period', mapthemes.TimePeriod);
+  if project.HasResults
+  and ((Period < 0) or (Period >= results.Nperiods)) then
+    raise Exception.CreateFmt('period must be between 0 and %d',
+      [results.Nperiods - 1]);
+
+  Epsg := project.MapEPSG;
+  if (Epsg = 0) and (project.MapUnits = muDegrees) then Epsg := 4326;
+  NodeItems := MainForm.MapViewerFrame.ViewNodeCombo.Items;
+  LinkItems := MainForm.MapViewerFrame.ViewLinkCombo.Items;
+  Skipped := 0;
+
+  Lines := TStringList.Create;
+  try
+    // Nodes
+    Lines.Add(FileHeader(BaseName + '_nodes'));
+    for I := 1 to project.GetItemCount(ctNodes) do
+    begin
+      if not project.GetNodeCoord(I, X, Y) or (X = EN_MISSING) then
+      begin
+        Inc(Skipped);
+        continue;
+      end;
+      Props := '"id":' + JsonText(project.GetID(ctNodes, I)) + ',"type":' +
+        JsonText(NodeTypeStr[EnsureRange(project.GetNodeType(I),
+          ntJunction, ntTank)]);
+      for K := 1 to NodeItems.Count - 1 do
+        Props := Props + ',"' + FieldName(NodeItems[K]) + '":' +
+          JsonValue(mapthemes.GetNodeValue(I, K, Period));
+      AddFeature(Props, '{"type":"Point","coordinates":' +
+        JsonCoord(X, Y) + '}');
+    end;
+    Lines.Add(']}');
+    Lines.SaveToFile(NodesFile);
+    NodeCount := Lines.Count - 2;
+
+    // Links, drawn from start node through any vertices to end node
+    Lines.Clear;
+    Lines.Add(FileHeader(BaseName + '_links'));
+    for I := 1 to project.GetItemCount(ctLinks) do
+    begin
+      if not project.GetLinkNodes(I, N1, N2)
+      or not project.GetNodeCoord(N1, X, Y) or (X = EN_MISSING) then
+      begin
+        Inc(Skipped);
+        continue;
+      end;
+      Coords := JsonCoord(X, Y);
+      for K := 1 to project.GetVertexCount(I) do
+        if project.GetVertexCoord(I, K, X, Y) then
+          Coords := Coords + ',' + JsonCoord(X, Y);
+      if not project.GetNodeCoord(N2, X, Y) or (X = EN_MISSING) then
+      begin
+        Inc(Skipped);
+        continue;
+      end;
+      Coords := Coords + ',' + JsonCoord(X, Y);
+
+      Props := '"id":' + JsonText(project.GetID(ctLinks, I)) + ',"type":' +
+        JsonText(LinkTypeStr[EnsureRange(project.GetLinkType(I),
+          ltCVPipe, ltValve)]) +
+        ',"node1":' + JsonText(project.GetID(ctNodes, N1)) +
+        ',"node2":' + JsonText(project.GetID(ctNodes, N2));
+      for K := 1 to LinkItems.Count - 1 do
+        Props := Props + ',"' + FieldName(LinkItems[K]) + '":' +
+          JsonValue(mapthemes.GetLinkValue(I, K, Period));
+      AddFeature(Props, '{"type":"LineString","coordinates":[' +
+        Coords + ']}');
+    end;
+    Lines.Add(']}');
+    Lines.SaveToFile(LinksFile);
+    LinkCount := Lines.Count - 2;
+  finally
+    Lines.Free;
+  end;
+
+  Fields := TJSONObject.Create;
+  Units := TJSONObject.Create;
+  DescribeFields(ctNodes, NodeItems, 'nodes');
+  DescribeFields(ctLinks, LinkItems, 'links');
+
+  Result := TJSONObject.Create;
+  Result.Add('nodes_file', NodesFile);
+  Result.Add('links_file', LinksFile);
+  Result.Add('node_count', NodeCount);
+  Result.Add('link_count', LinkCount);
+  Result.Add('skipped_without_coordinates', Skipped);
+  Result.Add('epsg', Epsg);
+  Result.Add('has_results', project.HasResults);
+  Result.Add('period', Period);
+  if project.HasResults then
+    Result.Add('time', results.GetTimeStr(Period));
+  Result.Add('fields', Fields);
+  Result.Add('units', Units);
+end;
+
+function ExecuteCommand(const CmdType: string; Params: TJSONObject): TJSONData;
+begin
+  if SameText(CmdType, 'ping') then
+    exit(Ping);
+
+  // A modal form would end up underneath anything a command displays
+  if Application.ModalLevel > 0 then
+    raise Exception.Create('EPANET-UI is showing a dialog; close it first');
+
+  if SameText(CmdType, 'get_project_info') then
+    Result := GetProjectInfo
+  else if SameText(CmdType, 'open_project') then
+    Result := OpenProject(Params)
+  else if SameText(CmdType, 'run_analysis') then
+    Result := RunAnalysis
+  else if SameText(CmdType, 'set_map_view') then
+    Result := SetMapView(Params)
+  else if SameText(CmdType, 'get_results') then
+    Result := GetResults(Params)
+  else if SameText(CmdType, 'export_geojson') then
+    Result := ExportGeoJson(Params)
+  else
+    raise Exception.CreateFmt('unknown command "%s"', [CmdType]);
+end;
+
+initialization
+  JsonFormat := DefaultFormatSettings;
+  JsonFormat.DecimalSeparator := '.';
+  JsonFormat.ThousandSeparator := #0;
+
+end.

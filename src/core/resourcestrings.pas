@@ -891,6 +891,7 @@ resourcestring
   rsPleaseConfirm  = 'Please Confirm';
   rsProjectSave    = 'Save Project';
   rsMsxSave        = 'Save Msx Data';
+  rsNoRemotePort   = 'Could not accept remote commands on port %d.';
 
   // about.pas
   rsVersions       = 'EPANET-UI Version 1.0.4' + LineEnding + LineEnding +

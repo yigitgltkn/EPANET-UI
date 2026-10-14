@@ -55,6 +55,10 @@ type
 var
   SimulationForm: TSimulationForm;
 
+  // When true the form closes as soon as a run ends instead of waiting for
+  // its OK button (set when a run is started by a remote command).
+  CloseWhenDone: Boolean = false;
+
 implementation
 
 {$R *.lfm}
@@ -84,6 +88,7 @@ begin
   CancelBtn.Visible := false;
   OkBtn.Visible := true;
   OkBtn.SetFocus;
+  if CloseWhenDone then ModalResult := mrOK;
 end;
 
 procedure TSimulationForm.OkBtnClick(Sender: TObject);

@@ -151,12 +151,12 @@ type
     procedure CreateFrames;
     procedure InitStatusBar;
     function  GetCmndLineFile: string;
-    procedure OpenFile(Filename: string);
     procedure SaveFile(Filename: string);
     function  SaveFileDlg: Integer;
     procedure SetMruFiles;
     procedure ShowWelcomePage;
     procedure SizeReportPanel;
+    procedure StartCommandServer;
     procedure StartNewProject;
 
   public
@@ -193,6 +193,7 @@ type
     procedure HideHintPanel;
     procedure HideHintPanelFrames;
     procedure InitFormContents(Filename: String; WebMapSource: Integer);
+    procedure OpenFile(Filename: string);
     procedure ProjectSetup;
     procedure ShowHintPanel(Title: String; Content: String);
     procedure ShowPage(aPage: TPage);
@@ -211,7 +212,7 @@ implementation
 
 uses
   project, projectloader, projectbuilder, projectsetup, welcome,
-  config, inifile, utils, mapthemes, resourcestrings;
+  config, inifile, utils, mapthemes, cmdserver, cmdhandlers, resourcestrings;
 
 { TmainForm }
 
@@ -439,14 +440,16 @@ begin
   end;
 
   StartNewProject;
+  StartCommandServer;
 
   // Open any EPANET input file appearing on command line
   Filename := GetCmndLineFile;
   if (Length(Filename) > 0) and FileExists(Filename) then
     OpenFile(Filename)
 
-  // Display a Welcome Page if called for
-  else if config.ShowWelcomePage then
+  // Display a Welcome Page if called for (a modal page would block
+  // remote commands)
+  else if config.ShowWelcomePage and not cmdserver.IsRunning then
     ShowWelcomePage
 
   // Open the last EPANET project file worked on if called for
@@ -474,6 +477,8 @@ end;
 
 procedure TMainForm.FormClose(Sender: TObject; var CloseAction: TCloseAction);
 begin
+  cmdserver.Stop;
+
   // Close any open report
   ReportFrame.CloseReport;
   GroupSelectorFrame.Close;
@@ -1060,14 +1065,34 @@ function TMainForm.GetCmndLineFile: string;
 //
 var
   StartupFile: string = '';
+  I: Integer;
 begin
-  if ParamCount > 0 then
+  // The file is the first argument that is not a '--' option
+  for I := 1 to ParamCount do
   begin
-    StartupFile := ParamStr(1);
+    if Copy(ParamStr(I), 1, 2) = '--' then continue;
+    StartupFile := ParamStr(I);
     if Length(ExtractFileDir(StartupFile)) = 0 then
       StartupFile := GetCurrentDir + DirectorySeparator + StartupFile;
+    break;
   end;
   Result := StartupFile;
+end;
+
+procedure TMainForm.StartCommandServer;
+//
+//  Accept commands from other programs on this computer when the program
+//  is started with the --remote or --remote=<port> command line option.
+//
+var
+  Port: Integer;
+begin
+  if not Application.HasOption('remote') then exit;
+  Port := StrToIntDef(Application.GetOptionValue('remote'),
+    cmdserver.DefaultPort);
+  if not cmdserver.Start(Port, @cmdhandlers.ExecuteCommand) then
+    utils.MsgDlg(rsConnectFail, Format(rsNoRemotePort, [Port]), mtWarning,
+      [mbOK], Self);
 end;
 
 procedure TMainForm.ViewHelp(Topic: String);
