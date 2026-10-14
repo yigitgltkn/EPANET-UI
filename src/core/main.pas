@@ -429,6 +429,15 @@ begin
   // Begin a new project
   if IsActivated then exit;
   IsActivated := true;
+
+  // A minimized state restored from the last session would leave the map
+  // with no area to draw on
+  if WindowState = wsMinimized then
+  begin
+    WindowState := wsNormal;
+    CheckBounds;
+  end;
+
   StartNewProject;
 
   // Open any EPANET input file appearing on command line

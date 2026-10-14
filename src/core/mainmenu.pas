@@ -847,6 +847,7 @@ end;
 
 procedure TMainMenuFrame.BasemapUnloadItemClick(Sender: TObject);
 begin
+  MainForm.MapFrame.PendingWebSource := 0;
   MainForm.MapFrame.UnloadBasemap;
   BasemapGeorefItem.Enabled := false;
   BasemapAlignItem.Enabled := false;

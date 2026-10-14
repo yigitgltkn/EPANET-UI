@@ -75,6 +75,9 @@ begin
   inifile.ReadProjectDefaults(ChangeFileExt(InpFileName, '.ini'), WebMapSource);
   if (WebMapSource > 0) then
   begin
+    // Keep the project's basemap source in case it can't be loaded now
+    MainForm.MapFrame.PendingWebSource := WebMapSource;
+
     // Check for internet connection
     Panel1.Caption := rsLoadBasemap;
     Application.ProcessMessages;

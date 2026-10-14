@@ -169,6 +169,11 @@ type
     Aligning:    Boolean;
     CtrlPoint:   array[1..3] of TCtrlPoint;
 
+    // Source of a web basemap the project uses but that could not be
+    // loaded this session (0 if none), kept so that it is not forgotten
+    // when the project's map options are saved.
+    PendingWebSource: Integer;
+
     procedure AddNode(NodeType: Integer);
     procedure AddLink(LinkType: Integer);
     procedure AddLabel;
@@ -302,6 +307,7 @@ begin
 
   HasBasemap := false;
   BasemapFile := '';
+  PendingWebSource := 0;
   for I := 1 to 3 do
     CtrlPoint[I].Visible := false;
 
@@ -1856,6 +1862,7 @@ begin
         RedrawMap;
         HasBasemap := true;
         BasemapFile := Filename;
+        PendingWebSource := 0;
       end;
     end;
   end;
@@ -1872,10 +1879,15 @@ var
   SouthWest:           TDoublePoint = (X: -130; Y: 17.5);
   ShowLocationFinder:  Boolean = false;
 begin
-  // Change the source for an existing WebMap
   if MapSource <= 0 then exit;
+
+  // Remember the source until the basemap is known to have loaded
+  PendingWebSource := MapSource;
+
+  // Change the source for an existing WebMap
   if Map.Basemap.WebMap <> nil then
   begin
+    PendingWebSource := 0;
     Map.Basemap.WebMap.SetSource(MapSource);
     Map.Basemap.NeedsRedraw := true;
     RedrawMap;
@@ -1921,6 +1933,7 @@ begin
   ShowWebBasemap;
   if HasWebBasemap then
   begin
+    PendingWebSource := 0;
     if ShowLocationFinder then
       FindBasemapLocation(MapSource);
     project.MapEPSG := Epsg;
@@ -2005,6 +2018,8 @@ function  TMapFrame.GetWebBasemapSource: Integer;
 begin
   if Map.Basemap.WebMap <> nil then
     Result := Map.Basemap.WebMap.MapSource
+  else if PendingWebSource > 0 then
+    Result := PendingWebSource
   else
     Result := -1;
 end;
