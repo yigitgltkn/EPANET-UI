@@ -9,26 +9,33 @@ Run inside QGIS (for example through the QGIS MCP plugin):
 The features are copied into memory layers so that QGIS does not keep the
 GeoJSON files open; EPANET-UI can then overwrite them after the next run.
 Running the script again refreshes the same layers and keeps their styling.
+
+It also puts an "Update EPANET" button on an EPANET toolbar: values edited
+in these layers are sent back to EPANET-UI (see qgis_update_epanet.py).
 """
+import inspect
 import json
+import os
 
 from qgis.core import (QgsFeatureRequest, QgsGraduatedSymbolRenderer, QgsLayerTreeLayer,
                        QgsLineSymbol, QgsMarkerSymbol, QgsProject, QgsProperty,
                        QgsRasterLayer, QgsRendererRange, QgsStyle, QgsSymbolLayer,
                        QgsVectorLayer)
+from qgis.PyQt.QtWidgets import QAction, QToolBar
 from qgis.utils import iface
 
 DEFAULTS = {
     "nodes_file": "",
     "links_file": "",
-    "group": "EPANET sonuçları",
-    "nodes_name": "Düğümler (basınç)",
-    "links_name": "Borular (hız)",
+    "group": "EPANET results",
+    "nodes_name": "Nodes (pressure)",
+    "links_name": "Pipes (velocity)",
     "pressure_breaks": [20, 40, 60, 80],          # in the model's pressure units
     "velocity_breaks": [0.05, 0.2, 0.5],          # in the model's velocity units
     "hide_layers": [],                            # source layers to switch off
     "add_basemap": True,
     "zoom": True,
+    "update_script": None,                        # None = qgis_update_epanet.py beside this file
 }
 cfg = dict(DEFAULTS)
 cfg.update(globals().get("CONFIG") or {})
@@ -49,7 +56,7 @@ def _read(path):
 
 
 def _labels(breaks):
-    text = [("%g" % b).replace(".", ",") for b in breaks]
+    text = ["%g" % b for b in breaks]
     return (["< " + text[0]] + ["%s – %s" % (text[i], text[i + 1]) for i in range(len(text) - 1)]
             + ["> " + text[-1]])
 
@@ -78,20 +85,17 @@ def _marker_symbol():
     return QgsMarkerSymbol.createSimple({"name": "circle", "size": "1.1", "outline_style": "no"})
 
 
-def _existing(name):
-    group = root.findGroup(cfg["group"])
-    if group is None:
-        return None
-    for node in group.findLayers():
-        layer = node.layer()
-        if layer is not None and layer.name() == name and layer.dataProvider().name() == "memory":
+def _existing(role):
+    """The layer this script made for "nodes" or "links" last time, wherever it is now."""
+    for layer in project.mapLayers().values():
+        if layer.customProperty("epanet/role") == role and layer.dataProvider().name() == "memory":
             return layer
     return None
 
 
-def _show(path, name, style):
+def _show(path, role, name, style):
     fresh = _read(path)
-    layer = _existing(name)
+    layer = _existing(role)
     if layer is not None and [f.name() for f in layer.fields()] == [f.name() for f in fresh.fields()]:
         # Same layer as last time: swap its contents, keep its styling
         provider = layer.dataProvider()
@@ -99,11 +103,52 @@ def _show(path, name, style):
         provider.addFeatures(list(fresh.getFeatures()))
         layer.updateExtents()
         layer.triggerRepaint()
-        return layer, "refreshed"
-    fresh.setName(name)
-    style(fresh)
-    project.addMapLayer(fresh, False)
-    return fresh, "created"
+        state = "refreshed"
+    else:
+        if layer is not None:          # made by an older export with other fields
+            project.removeMapLayer(layer.id())
+        layer = fresh
+        layer.setName(name)
+        style(layer)
+        project.addMapLayer(layer, False)
+        state = "created"
+    # What qgis_update_epanet.py compares the edited values with
+    layer.setCustomProperty("epanet/role", role)
+    layer.setCustomProperty("epanet/file", path)
+    layer.setCustomProperty("epanet/mtime", repr(os.path.getmtime(path)))
+    return layer, state
+
+
+def _group():
+    found = root.findGroup(cfg["group"])
+    return found if found is not None else root.insertGroup(0, cfg["group"])
+
+
+def _add_update_button(script):
+    """An "Update EPANET" button on an EPANET toolbar, made once per QGIS session."""
+    window = iface.mainWindow()
+    action = window.findChild(QAction, "epanetUpdateAction")
+    if action is None:
+        action = QAction("Update EPANET", window)
+        action.setObjectName("epanetUpdateAction")
+        action.setToolTip("Send the values edited in the EPANET results layers to EPANET-UI, "
+                          "run the model again and refresh the layers")
+    # Owned by the main window: iface.addToolBar("...") would leave it to Python,
+    # which deletes it when this script ends
+    toolbar = window.findChild(QToolBar, "epanetToolbar")
+    if toolbar is None:
+        toolbar = QToolBar("EPANET", window)
+        toolbar.setObjectName("epanetToolbar")
+        window.addToolBar(toolbar)
+    if action not in toolbar.actions():
+        toolbar.addAction(action)
+    toolbar.setVisible(True)
+    try:
+        action.triggered.disconnect()
+    except TypeError:
+        pass
+    action.triggered.connect(lambda: exec(
+        compile(open(script, encoding="utf-8").read(), script, "exec"), {"CONFIG": {"confirm": True}}))
 
 
 # Drop a result group made from files directly (it would keep the files locked)
@@ -113,20 +158,23 @@ if group is not None and any(n.layer() is not None and n.layer().dataProvider().
     for node in group.findLayers():
         project.removeMapLayer(node.layerId())
     root.removeChildNode(group)
-    group = None
-if group is None:
-    group = root.insertGroup(0, cfg["group"])
 
 nodes, report["nodes"] = _show(
-    cfg["nodes_file"], cfg["nodes_name"],
+    cfg["nodes_file"], "nodes", cfg["nodes_name"],
     lambda lyr: _graduated(lyr, "pressure", cfg["pressure_breaks"], "RdYlBu", _marker_symbol))
 links, report["links"] = _show(
-    cfg["links_file"], cfg["links_name"],
+    cfg["links_file"], "links", cfg["links_name"],
     lambda lyr: _graduated(lyr, "velocity", cfg["velocity_breaks"], "Blues", _line_symbol, 0.45))
 if report["nodes"] == "created":
-    group.insertLayer(0, nodes)
+    _group().insertLayer(0, nodes)
 if report["links"] == "created":
-    group.addLayer(links)
+    _group().addLayer(links)
+
+update_script = cfg.get("update_script") or os.path.join(
+    os.path.dirname(os.path.abspath(inspect.currentframe().f_code.co_filename)), "qgis_update_epanet.py")
+report["update_button"] = os.path.isfile(update_script)
+if report["update_button"]:
+    _add_update_button(update_script)
 
 for name in cfg["hide_layers"]:
     for layer in project.mapLayersByName(name):

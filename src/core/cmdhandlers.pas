@@ -21,6 +21,8 @@ unit cmdhandlers;
    get_results       - returns node or link values for a theme
    export_geojson    - writes the network and its results to GeoJSON files
    set_3d_view       - shows the 3D view of the network or of one valve
+   apply_edits       - changes junction and pipe properties, e.g. ones
+                       edited in QGIS
 }
 
 {$mode objfpc}{$H+}
@@ -35,7 +37,7 @@ function ExecuteCommand(const CmdType: string; Params: TJSONObject): TJSONData;
 implementation
 
 uses
-  Forms, Math, StdCtrls, ComCtrls,
+  Forms, Math, StrUtils, StdCtrls, ComCtrls,
   main, mainmenu, mapviewerframe, view3dframe, project, results, mapthemes,
   simulator, epanet2, cmdserver, resourcestrings;
 
@@ -66,6 +68,16 @@ type
     Value: Double;
   end;
   TRows = array of TRow;
+
+  // One property change requested through apply_edits
+  TPropEdit = record
+    Category: Integer;        // ctNodes or ctLinks
+    Index: Integer;
+    Param: Integer;           // EN_ code, or -1 for a pipe's status
+    ID, Field: string;
+    OldValue, NewValue: Single;
+    OldStatus, NewStatus: string;
+  end;
 
 var
   JsonFormat: TFormatSettings;
@@ -614,6 +626,22 @@ begin
     FloatToStr(Y, JsonFormat) + ']';
 end;
 
+function PipeStatus(Index: Integer): string;
+//
+//  A pipe's initial status: 'Open', 'Closed' or 'CV' (has a check valve).
+//
+var
+  X: Single = 0;
+begin
+  if project.GetLinkType(Index) = ltCVPipe then
+    exit('CV');
+  epanet2.ENgetlinkvalue(Index, EN_INITSTATUS, X);
+  if Round(X) = EN_CLOSED then
+    Result := 'Closed'
+  else
+    Result := 'Open';
+end;
+
 function ExportGeoJson(Params: TJSONObject): TJSONObject;
 //
 //  Writes <name>_nodes.geojson and <name>_links.geojson, in the map's
@@ -759,6 +787,10 @@ begin
           ltCVPipe, ltValve)]) +
         ',"node1":' + JsonText(project.GetID(ctNodes, N1)) +
         ',"node2":' + JsonText(project.GetID(ctNodes, N2));
+      if project.GetLinkType(I) <= ltPipe then
+        Props := Props + ',"status":' + JsonText(PipeStatus(I))
+      else
+        Props := Props + ',"status":null';
       for K := 1 to LinkItems.Count - 1 do
         Props := Props + ',"' + FieldName(LinkItems[K]) + '":' +
           JsonValue(mapthemes.GetLinkValue(I, K, Period));
@@ -776,6 +808,7 @@ begin
   Units := TJSONObject.Create;
   DescribeFields(ctNodes, NodeItems, 'nodes');
   DescribeFields(ctLinks, LinkItems, 'links');
+  Fields.Arrays['links'].Insert(0, TJSONString.Create('status'));
 
   Result := TJSONObject.Create;
   Result.Add('nodes_file', NodesFile);
@@ -790,6 +823,304 @@ begin
     Result.Add('time', results.GetTimeStr(Period));
   Result.Add('fields', Fields);
   Result.Add('units', Units);
+end;
+
+function ApplyEdits(Params: TJSONObject): TJSONObject;
+//
+//  Changes junction and pipe properties, for example ones edited in QGIS
+//  on the layers that export_geojson wrote.
+//
+//  Parameters:
+//    nodes    [{"id": "J1", "elevation": 12.5, "base_demand": 0.2}, ...]
+//    links    [{"id": "P1", "diameter": 150, "length": 80.5,
+//               "roughness": 130, "status": "Open|Closed|CV"}, ...]
+//    dry_run  true reports what would change without changing anything
+//
+//  Each item needs an "id"; its other fields are optional. Values are in
+//  the project's units, as export_geojson writes them. Values equal to the
+//  current ones are left alone. Everything is checked first: if anything
+//  is refused, nothing is changed and the reply lists the problems.
+//
+const
+  NodeFields: array[0..1] of string = ('elevation', 'base_demand');
+  NodeParams: array[0..1] of Integer = (EN_ELEVATION, EN_BASEDEMAND);
+  LinkFields: array[0..2] of string = ('diameter', 'length', 'roughness');
+  LinkParams: array[0..2] of Integer = (EN_DIAMETER, EN_LENGTH, EN_ROUGHNESS);
+  Statuses: array[0..2] of string = ('Open', 'Closed', 'CV');
+var
+  Edits: array of TPropEdit;
+  EditCount, ErrCode: Integer;
+  DryRun, Applied: Boolean;
+  Changes, Problems: TJSONArray;
+  Change: TJSONObject;
+  E: TPropEdit;
+
+  procedure AddProblem(const ID, Field, Text: string);
+  var
+    P: TJSONObject;
+  begin
+    P := TJSONObject.Create;
+    P.Add('id', ID);
+    if Field <> '' then P.Add('field', Field);
+    P.Add('problem', Text);
+    Problems.Add(P);
+  end;
+
+  procedure AddEdit(const Edit: TPropEdit);
+  begin
+    if EditCount = Length(Edits) then
+      SetLength(Edits, 2 * EditCount + 16);
+    Edits[EditCount] := Edit;
+    Inc(EditCount);
+  end;
+
+  function ReadNumber(Item: TJSONObject; const ID, Field: string;
+    var Value: Single): Boolean;
+  var
+    V: TJSONData;
+    D: Double;
+  begin
+    Result := false;
+    V := Item.Find(Field);
+    if V = nil then exit;
+    if V.JSONType = jtNumber then
+      D := V.AsFloat
+    else if (V.JSONType <> jtString)
+    or not TryStrToFloat(Trim(V.AsString), D, JsonFormat) then
+    begin
+      AddProblem(ID, Field, 'is not a number');
+      exit;
+    end;
+    if IsNan(D) or IsInfinite(D) then
+    begin
+      AddProblem(ID, Field, 'is not a number');
+      exit;
+    end;
+    Value := D;
+    Result := true;
+  end;
+
+  function Differs(OldValue, NewValue: Single): Boolean;
+  begin
+    // export_geojson writes 6 significant digits
+    Result := Abs(NewValue - OldValue) > 1e-5 * Max(1.0, Abs(OldValue));
+  end;
+
+  procedure ReadItems(Category: Integer; const Key: string);
+  var
+    List: TJSONData;
+    Item: TJSONObject;
+    I, J, Index, Count: Integer;
+    ID, What, S: string;
+    Value: Single;
+    Edit: TPropEdit;
+    Editable: Boolean;
+  begin
+    List := Params.Find(Key);
+    if List = nil then exit;
+    if List.JSONType <> jtArray then
+      raise Exception.CreateFmt('"%s" must be a list', [Key]);
+    if Category = ctNodes then
+    begin
+      Count := Length(NodeFields);
+      What := 'junctions';
+    end
+    else
+    begin
+      Count := Length(LinkFields);
+      What := 'pipes';
+    end;
+
+    for I := 0 to List.Count - 1 do
+    begin
+      if List.Items[I].JSONType <> jtObject then
+      begin
+        AddProblem('', '', Format('item %d of "%s" is not an object', [I, Key]));
+        continue;
+      end;
+      Item := TJSONObject(List.Items[I]);
+      ID := '';
+      if (Item.Find('id') <> nil)
+      and (Item.Find('id').JSONType in [jtString, jtNumber]) then
+        ID := Trim(Item.Find('id').AsString);
+      if ID = '' then
+      begin
+        AddProblem('', '', Format('item %d of "%s" has no "id"', [I, Key]));
+        continue;
+      end;
+      Index := project.GetItemIndex(Category, ID);
+      if Index < 1 then
+      begin
+        AddProblem(ID, '', 'not found in the project');
+        continue;
+      end;
+      if Category = ctNodes then
+        Editable := project.GetNodeType(Index) = ntJunction
+      else
+        Editable := project.GetLinkType(Index) <= ltPipe;
+
+      Edit := Default(TPropEdit);
+      Edit.Category := Category;
+      Edit.Index := Index;
+      Edit.ID := ID;
+
+      for J := 0 to Count - 1 do
+      begin
+        if Category = ctNodes then
+        begin
+          Edit.Field := NodeFields[J];
+          Edit.Param := NodeParams[J];
+          Edit.OldValue := project.GetNodeParam(Index, Edit.Param);
+        end
+        else
+        begin
+          Edit.Field := LinkFields[J];
+          Edit.Param := LinkParams[J];
+          Edit.OldValue := project.GetLinkParam(Index, Edit.Param);
+        end;
+        if not ReadNumber(Item, ID, Edit.Field, Value) then continue;
+        if not Differs(Edit.OldValue, Value) then continue;
+        if not Editable then
+          AddProblem(ID, Edit.Field, 'only ' + What + ' can be changed')
+        else if (Category = ctLinks) and (Value <= 0) then
+          AddProblem(ID, Edit.Field, 'must be greater than zero')
+        else
+        begin
+          Edit.NewValue := Value;
+          AddEdit(Edit);
+        end;
+      end;
+
+      if (Category = ctLinks) and (Item.Find('status') <> nil) then
+      begin
+        Edit.Field := 'status';
+        Edit.Param := -1;
+        if Item.Find('status').JSONType <> jtString then
+          S := ''
+        else
+          S := Trim(Item.Get('status', ''));
+        if not Editable then
+        begin
+          if S <> '' then
+            AddProblem(ID, 'status', 'only pipes can be changed');
+        end
+        else if AnsiIndexText(S, Statuses) < 0 then
+          AddProblem(ID, 'status', 'must be Open, Closed or CV')
+        else
+        begin
+          Edit.OldStatus := PipeStatus(Index);
+          Edit.NewStatus := Statuses[AnsiIndexText(S, Statuses)];
+          if Edit.NewStatus <> Edit.OldStatus then
+            AddEdit(Edit);
+        end;
+      end;
+    end;
+  end;
+
+  procedure SetStatus(var Index: Integer; const Status: string);
+  begin
+    // As the property editor does it (see validator.ValidatePipe)
+    if Status = 'CV' then
+      ErrCode := epanet2.ENsetlinktype(Index, EN_CVPIPE, EN_UNCONDITIONAL)
+    else
+    begin
+      ErrCode := epanet2.ENsetlinktype(Index, EN_PIPE, EN_UNCONDITIONAL);
+      if ErrCode <= 100 then
+      begin
+        if Status = 'Open' then
+          ErrCode := epanet2.ENsetlinkvalue(Index, EN_INITSTATUS, EN_OPEN)
+        else
+          ErrCode := epanet2.ENsetlinkvalue(Index, EN_INITSTATUS, EN_CLOSED);
+      end;
+    end;
+  end;
+
+var
+  I: Integer;
+begin
+  CheckReady;
+  if project.GetItemCount(ctNodes) = 0 then
+    raise Exception.Create('no network is loaded');
+  DryRun := Params.Get('dry_run', false);
+  Applied := false;
+  EditCount := 0;
+  Edits := nil;
+
+  Problems := TJSONArray.Create;
+  Changes := TJSONArray.Create;
+  Result := TJSONObject.Create;
+  try
+    ReadItems(ctNodes, 'nodes');
+    ReadItems(ctLinks, 'links');
+
+    if (Problems.Count = 0) and not DryRun then
+    begin
+      for I := 0 to EditCount - 1 do
+      begin
+        E := Edits[I];
+        if E.Param < 0 then
+          SetStatus(E.Index, E.NewStatus)
+        else if E.Category = ctNodes then
+          ErrCode := epanet2.ENsetnodevalue(E.Index, E.Param, E.NewValue)
+        else
+          ErrCode := epanet2.ENsetlinkvalue(E.Index, E.Param, E.NewValue);
+        if ErrCode > 100 then
+          AddProblem(E.ID, E.Field, Format('engine error %d', [ErrCode]));
+      end;
+      if EditCount > 0 then
+      begin
+        Applied := true;
+        project.HasChanged := true;
+        project.UpdateResultsStatus;
+        MainForm.ProjectFrame.RefreshPropEditor;
+        MainForm.MapFrame.RedrawMap;
+      end;
+    end;
+
+    for I := 0 to Min(EditCount, MaxRowLimit) - 1 do
+    begin
+      E := Edits[I];
+      Change := TJSONObject.Create;
+      if E.Category = ctNodes then
+        Change.Add('category', 'node')
+      else
+        Change.Add('category', 'link');
+      Change.Add('id', E.ID);
+      Change.Add('field', E.Field);
+      if E.Param < 0 then
+      begin
+        Change.Add('old', E.OldStatus);
+        Change.Add('new', E.NewStatus);
+      end
+      else
+      begin
+        Change.Add('old', Num(E.OldValue));
+        Change.Add('new', Num(E.NewValue));
+      end;
+      Changes.Add(Change);
+    end;
+
+    Result.Add('applied', Applied);
+    Result.Add('dry_run', DryRun);
+    Result.Add('change_count', EditCount);
+    Result.Add('changes', Changes);
+    Changes := nil;
+    if Problems.Count > 0 then
+    begin
+      Result.Add('problems', Problems);
+      Problems := nil;
+    end;
+    Result.Add('has_unsaved_changes', project.HasChanged);
+    Result.Add('results_status', ResultsStatusStr[EnsureRange(
+      project.ResultsStatus, rsNotAvailable, rsNeedsUpdating)]);
+  except
+    Result.Free;
+    Changes.Free;
+    Problems.Free;
+    raise;
+  end;
+  Changes.Free;
+  Problems.Free;
 end;
 
 function Set3DView(Params: TJSONObject): TJSONObject;
@@ -930,6 +1261,8 @@ begin
     Result := ExportGeoJson(Params)
   else if SameText(CmdType, 'set_3d_view') then
     Result := Set3DView(Params)
+  else if SameText(CmdType, 'apply_edits') then
+    Result := ApplyEdits(Params)
   else
     raise Exception.CreateFmt('unknown command "%s"', [CmdType]);
 end;
