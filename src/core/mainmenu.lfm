@@ -575,6 +575,13 @@ object MainMenuFrame: TMainMenuFrame
             ImageIndex = 22
             Style = tbsButtonDrop
           end
+          object ProjectQgisBtn: TToolButton
+            Left = 836
+            Hint = '  '#13#10'  Send the network and its results to QGIS  '#13#10'  '
+            Top = 0
+            Caption = 'QGIS'
+            OnClick = ProjectQgisBtnClick
+          end
         end
       end
       object Page5: TPage

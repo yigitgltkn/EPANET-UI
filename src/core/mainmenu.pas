@@ -113,6 +113,7 @@ type
     ProjectDetailsBtn:    TToolButton;
     ProjectFindBtn:       TToolButton;
     ProjectReportBtn:     TToolButton;
+    ProjectQgisBtn:       TToolButton;
     ProjectSep1:          TToolButton;
     ProjectSep2:          TToolButton;
     ProjectSetupBtn:      TToolButton;
@@ -210,6 +211,7 @@ type
     procedure ProjectDeleteBtnClick(Sender: TObject);
     procedure ProjectDetailsBtnClick(Sender: TObject);
     procedure ProjectFindBtnClick(Sender: TObject);
+    procedure ProjectQgisBtnClick(Sender: TObject);
     procedure ProjectSetupBtnClick(Sender: TObject);
     procedure ProjectSummaryBtnClick(Sender: TObject);
 
@@ -247,7 +249,8 @@ implementation
 
 uses
   main, filemenu, basemapmenu, project, projectsummary, projectviewer, config,
-  mapthemes, simulator, results, reportframe, about, resourcestrings;
+  mapthemes, simulator, results, reportframe, about, resourcestrings, utils,
+  qgislink;
 
 const
   MenuPanelHoverColor: TColor =  clHighlight; //00804C23 00D1B499
@@ -578,6 +581,21 @@ begin
     MainForm.HideHintPanelFrames;
     MainForm.LocaterFrame.Show;
   end;
+end;
+
+procedure TMainMenuFrame.ProjectQgisBtnClick(Sender: TObject);
+var
+  Msg: string;
+  Sent: Boolean;
+begin
+  Screen.Cursor := crHourGlass;
+  try
+    Sent := qgislink.SendToQgis(Msg);
+  finally
+    Screen.Cursor := crDefault;
+  end;
+  if not Sent then
+    utils.MsgDlg('QGIS', Msg, mtError, [mbOK]);
 end;
 
 procedure TMainMenuFrame.ProjectSetupBtnClick(Sender: TObject);

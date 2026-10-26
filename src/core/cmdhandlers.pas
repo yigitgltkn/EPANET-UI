@@ -24,6 +24,9 @@ unit cmdhandlers;
    show_report       - shows one of the program's reports
    apply_edits       - changes junction and pipe properties, e.g. ones
                        edited in QGIS
+   send_to_qgis      - shows the network and its results in QGIS, as the
+                       QGIS button does
+   activate          - brings the EPANET-UI window to the front
 }
 
 {$mode objfpc}{$H+}
@@ -40,7 +43,7 @@ implementation
 uses
   Forms, Math, StrUtils, StdCtrls, ComCtrls,
   main, mainmenu, mapviewerframe, view3dframe, reportframe, project, results,
-  mapthemes, simulator, epanet2, cmdserver, resourcestrings;
+  mapthemes, simulator, epanet2, cmdserver, qgislink, resourcestrings;
 
 const
   DefRowLimit = 50;
@@ -1275,6 +1278,8 @@ begin
 end;
 
 function ExecuteCommand(const CmdType: string; Params: TJSONObject): TJSONData;
+var
+  Msg: string;
 begin
   if SameText(CmdType, 'ping') then
     exit(Ping);
@@ -1301,6 +1306,18 @@ begin
     Result := ShowReport(Params)
   else if SameText(CmdType, 'apply_edits') then
     Result := ApplyEdits(Params)
+  else if SameText(CmdType, 'send_to_qgis') then
+  begin
+    CheckReady;
+    if not qgislink.SendToQgis(Msg) then
+      raise Exception.Create(Msg);
+    Result := TJSONObject.Create(['sent', true, 'message', Msg]);
+  end
+  else if SameText(CmdType, 'activate') then
+  begin
+    qgislink.ComeToFront;
+    Result := TJSONObject.Create(['active', true]);
+  end
   else
     raise Exception.CreateFmt('unknown command "%s"', [CmdType]);
 end;

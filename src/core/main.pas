@@ -149,6 +149,7 @@ type
   private
     IsActivated: Boolean;
     IsResized:   Boolean;
+    QgisIconIndex: Integer;
 
     procedure CheckBounds;
     procedure CreateFrames;
@@ -216,7 +217,8 @@ implementation
 
 uses
   project, projectloader, projectbuilder, projectsetup, welcome,
-  config, inifile, utils, mapthemes, cmdserver, cmdhandlers, resourcestrings;
+  config, inifile, utils, mapthemes, cmdserver, cmdhandlers, qgislink,
+  resourcestrings;
 
 { TmainForm }
 
@@ -259,6 +261,10 @@ begin
   Font.Size := config.FontSize;
   HintTitleLabel.Font.Style := [fsBold];
   HintPanel.Color := config.InfoColor;
+
+  // The QGIS button's icon is not part of the image list's design; it is
+  // added before the list is lightened for the dark theme
+  QgisIconIndex := qgislink.AddQgisIcon(MaterialImageList);
 
   // The icons of the menus are dark gray, so they are made light for the
   // dark theme
@@ -306,6 +312,7 @@ begin
     MainMenuFrame.Parent := MenuPanel;
     MainMenuFrame.Align := alClient;
     MainMenuFrame.Init;
+    MainMenuFrame.ProjectQgisBtn.ImageIndex := QgisIconIndex;
   end;
   if not Assigned(FileMenuFrame) then
   begin

@@ -190,7 +190,7 @@ if cfg["add_basemap"] and not any(isinstance(l, QgsRasterLayer) for l in project
         root.insertChildNode(-1, QgsLayerTreeLayer(osm))
 
 canvas = iface.mapCanvas()
-if cfg["zoom"] and "created" in (report["nodes"], report["links"]):
+if cfg["zoom"]:
     extent = canvas.mapSettings().layerExtentToOutputExtent(links, links.extent())
     extent.scale(1.05)
     canvas.setExtent(extent)

@@ -36,6 +36,7 @@ DEFAULTS = {
     "run": True,              # run the model again and refresh the layers
     "timeout": 600,           # seconds to wait for EPANET-UI
     "max_listed": 15,         # changes listed in the confirmation
+    "activate_epanet": True,  # bring EPANET-UI to the front when it has the new results
 }
 EDITABLE = {"nodes": ("elevation", "base_demand"),
             "links": ("diameter", "length", "roughness", "status")}
@@ -143,6 +144,18 @@ def _diff(layer, role):
     if deleted:
         ignored["deleted features"] = deleted
     return edits, ignored, base, path
+
+
+def _bring_epanet_forward():
+    try:
+        import ctypes
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)      # ASFW_ANY
+    except (AttributeError, OSError):
+        pass                                                    # not Windows
+    try:
+        _call("activate")
+    except UpdateError:
+        pass                                                    # older EPANET-UI
 
 
 def _pressures(rows):
@@ -257,6 +270,8 @@ def update():
             before[0], after[0], units, before[1], after[1], units)
     if run["status"] == "warning":
         message += " The run gave warnings; see the status report in EPANET-UI."
+    if cfg["activate_epanet"]:
+        _bring_epanet_forward()
     return summary, message
 
 
