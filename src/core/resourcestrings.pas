@@ -893,6 +893,11 @@ resourcestring
   rsMsxSave        = 'Save Msx Data';
   rsNoRemotePort   = 'Could not accept remote commands on port %d.';
 
+  // config.pas
+  rsColorTheme     = 'Color Theme';
+  rsThemeAfterRestart = 'The new color theme will be used the next time ' +
+                     'EPANET-UI is started.';
+
   // view3dframe.pas
   rs3dTitle        = 'Hydraulic Grade Line';
   rs3dNoResults    = 'No simulation results';

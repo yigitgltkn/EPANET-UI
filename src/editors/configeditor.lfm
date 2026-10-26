@@ -130,12 +130,25 @@ object ConfigForm: TConfigForm
       Top = 237
       Width = 187
     end
-    object CheckBox7: TCheckBox
+    object ThemeLabel: TLabel
       Left = 34
-      Height = 19
-      Top = 178
-      Width = 131
-      Caption = 'Change Color Theme'
+      Height = 15
+      Top = 180
+      Width = 72
+      Caption = 'Color Theme'
+    end
+    object ThemeCombo: TComboBox
+      Left = 131
+      Height = 23
+      Top = 176
+      Width = 90
+      ItemHeight = 15
+      Items.Strings = (
+        'Light gray'
+        'Light blue'
+        'Dark'
+      )
+      Style = csDropDownList
       TabOrder = 8
     end
   end

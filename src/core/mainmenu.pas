@@ -324,7 +324,7 @@ begin
   MenuPanel.Font.Color := clWhite;
   MenuPanel := NewMenuPanel;
   MenuPanel.Color := MenuNotebook.Color;
-  MenuPanel.Font.Color := clBlack;
+  MenuPanel.Font.Color := clWindowText;
   MenuNotebook.PageIndex := MenuPanel.Tag;
 
   // MenuPanel1 is for the File menu, which is displayed in a separate frame

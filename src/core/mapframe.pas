@@ -958,6 +958,7 @@ procedure TMapFrame.InitMapOptions;
 //
 begin
   Map.Options := mapoptions.DefaultOptions;
+  Map.Options.BackColor := mapoptions.ThemedBackColor(Map.Options.BackColor);
 end;
 
 procedure TMapFrame.EditMapOptions;

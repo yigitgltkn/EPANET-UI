@@ -36,7 +36,9 @@ begin
   RequireDerivedFormResource:=True;
   Application.Scaled:=True;
   Application.Title:='EPANET-UI';
+  config.InitAppearance;
   Application.Initialize;
+  config.InitFont;
   Application.CreateForm(TmainForm, mainForm);
   Application.CreateForm(TControlsEditorForm, ControlsEditorForm);
   Application.CreateForm(TRulesEditorForm, RulesEditorForm);

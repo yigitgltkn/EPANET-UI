@@ -96,8 +96,6 @@ const
     (rsExitMenu, rsNewProject, rsOpenProject, rsSaveProject,
      rsSaveProjectAs, rsImportData, rsConfigure, rsExitProgram);
 
-  SelectionColor: TColor = $00ffe8cc;  //clHighlight;
-
 
 procedure TFileMenuFrame.MenuListBoxClick(Sender: TObject);
 begin
@@ -148,10 +146,10 @@ var
 begin
   C := (Control As TListBox).Canvas;
   C.Brush.Color := FilesListBox.Color;
-  C.Font.Color := clBlack;
+  C.Font.Color := clWindowText;
   if Control.Focused and (odSelected in State) then
   begin
-    C.Brush.Color := SelectionColor;
+    C.Brush.Color := config.SelectColor;
   end;
   if Control is TListBox then
   begin
@@ -221,10 +219,10 @@ var
 begin
   C := (Control as TListBox).Canvas;
   C.Brush.Color := ImportListBox.Color;
-  C.Font.Color := clBlack;
+  C.Font.Color := clWindowText;
   if (odSelected in State) then
   begin
-    C.Brush.Color := SelectionColor;
+    C.Brush.Color := config.SelectColor;
   end;
   if Control is TListBox then
   begin
@@ -268,10 +266,10 @@ var
 begin
   C := (Control as TListBox).Canvas;
   C.Brush.Color := MenuListBox.Color;
-  C.Font.Color := clBlack;
+  C.Font.Color := clWindowText;
   if Control.Focused and (odSelected in State) then
   begin
-    C.Brush.Color := SelectionColor;
+    C.Brush.Color := config.SelectColor;
   end;
   C.FillRect(ARect);
   Yoffset := (ARect.Height - IconImageList.Height) div 2;

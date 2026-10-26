@@ -244,7 +244,8 @@ begin
     ShowLinksBySize := Ini.ReadBool('MAP', 'SHOWLINKSBYSIZE', DefaultOptions.ShowLinksBySize);
     ShowLinkBorder := Ini.ReadBool('MAP', 'SHOWLINKBORDER', DefaultOptions.ShowLinkBorder);
     S := ColorToString(DefaultOptions.BackColor);
-    BackColor := StringToColor(Ini.ReadString('MAP', 'BACKCOLOR', S));
+    BackColor := ThemedBackColor(StringToColor(Ini.ReadString('MAP',
+      'BACKCOLOR', S)));
   end;
 
   // Map theme colors

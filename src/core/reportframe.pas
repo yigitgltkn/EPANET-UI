@@ -177,6 +177,7 @@ begin
   TopPanel.Caption := ReportTypeStr[QWord(ReportType)];
   Report.Parent := ReportPanel;
   Report.Align := alClient;
+  if config.Theme = config.thDark then config.DarkenControls(Report);
 
   // If HideReport is true then hide the report while its InitReport
   // procedure collects information on what to report.

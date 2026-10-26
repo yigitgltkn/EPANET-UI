@@ -378,8 +378,8 @@ begin
   begin
     if gdSelected in aState then
     begin
-      Canvas.Brush.Color := $00FFE8CD;
-      Canvas.Font.Color := clBlack;
+      Canvas.Brush.Color := config.SelectColor;
+      Canvas.Font.Color := clWindowText;
     end;
   end;
 end;

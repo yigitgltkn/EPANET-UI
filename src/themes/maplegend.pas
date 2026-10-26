@@ -184,7 +184,7 @@ procedure TMapLegendFrame.SetTextColor;
 // Adjust the legend's font color depending on map background color.
 //
 begin
-  if Color = mapoptions.DarkColor then
+  if mapoptions.IsDarkColor(Color) then
   begin
     Font.Color := clWhite;
   end

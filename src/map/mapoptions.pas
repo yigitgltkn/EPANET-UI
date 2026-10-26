@@ -47,7 +47,7 @@ type
   end;
 
 const
-  DarkColor = $004C4641;
+  DarkColor = $0036302A;
   DefaultOptions : TMapOptions =
     (NodeSize        : 4;
      ShowNodesBySize : false;
@@ -142,6 +142,8 @@ var
   MapOptionsForm: TMapOptionsForm;
 
 function Edit(var theOptions: TMapOptions): Boolean;
+function IsDarkColor(aColor: TColor): Boolean;
+function ThemedBackColor(aColor: TColor): TColor;
 
 implementation
 
@@ -157,6 +159,28 @@ const
 
   ColorNames: array [0..7] of string =
     (rsWhite,rsCream,rsYellow,rsGreen,rsCyan,rsGray,rsBlue,rsBlack);
+
+function IsDarkColor(aColor: TColor): Boolean;
+//
+//  True if light text is needed to show up on aColor. (Map backgrounds were
+//  once compared with DarkColor, whose value has since changed.)
+//
+begin
+  aColor := ColorToRGB(aColor);
+  Result := Red(aColor) * 299 + Green(aColor) * 587 + Blue(aColor) * 114 < 128000;
+end;
+
+function ThemedBackColor(aColor: TColor): TColor;
+//
+//  The dark color theme shows a map whose background is the default white
+//  on a dark background instead.
+//
+begin
+  if (config.Theme = config.thDark) and (aColor = clWhite) then
+    Result := DarkColor
+  else
+    Result := aColor;
+end;
 
 function Edit(var theOptions: TMapOptions): Boolean;
 var

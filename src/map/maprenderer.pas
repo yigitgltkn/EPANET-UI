@@ -524,7 +524,7 @@ begin
   Map.CharHeight := Map.Canvas.TextHeight('[');
 
   // Assign colors to drawing features
-  if (Map.Options.BackColor = mapoptions.DarkColor) then
+  if mapoptions.IsDarkColor(Map.Options.BackColor) then
   begin
     LabelColor := clWhite;
     ArrowColor := clWhite;

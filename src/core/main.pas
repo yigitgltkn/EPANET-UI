@@ -144,6 +144,7 @@ type
       APPI: Integer; var AResultWidth: Integer);
     procedure MRUMenuMgrRecentFile(Sender: TObject; const AFileName: String);
     procedure StatusPanelPaint(Sender: TObject);
+    procedure DarkenForm(Sender: TObject; Form: TCustomForm);
 
   private
     IsActivated: Boolean;
@@ -233,9 +234,6 @@ begin
   MainPanel.Align := alClient;
   MapPanel.Align := alClient;
 
-  Application.HintColor := $00E1FFFF; //00F9F4F0;
-  Screen.HintFont.Color := clBlack;
-  Screen.HintFont.Size := config.FontSize;
   Application.ShowButtonGlyphs := sbgNever;
 
   // Setup Help system
@@ -255,9 +253,25 @@ begin
   end;
   IniPropStorage1.IniFileName := AppIniFile;
 
+  Application.HintColor := config.InfoColor;
+  Screen.HintFont.Color := clInfoText;
+  Screen.HintFont.Size := config.FontSize;
   Font.Size := config.FontSize;
   HintTitleLabel.Font.Style := [fsBold];
-  HintPanel.Color := $00E1FFFF;
+  HintPanel.Color := config.InfoColor;
+
+  // The icons of the menus are dark gray, so they are made light for the
+  // dark theme
+  if config.Theme = config.thDark then
+  begin
+    config.LightenImageList(MaterialImageList);
+    config.LightenImageList(MaterialToolbarList);
+    config.LightenImageList(PopupImageList);
+    config.LightenImageList(WindowImageList);
+    config.LightenImageList(EditingImageList);
+    ReportPage.Color := config.ThemeColor;
+    Screen.AddHandlerFormVisibleChanged(@DarkenForm);
+  end;
   SetMruFiles;
   CreateFrames;
   SetColorTheme;
@@ -265,6 +279,14 @@ begin
   // Disable floating point exceptions
   SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow,
     exUnderflow, exPrecision]);
+end;
+
+procedure TMainForm.DarkenForm(Sender: TObject; Form: TCustomForm);
+//
+//  Give each form the dark theme's colors as it comes into view.
+//
+begin
+  if Form.Visible then config.DarkenControls(Form);
 end;
 
 procedure TMainForm.SetMruFiles;
@@ -907,9 +929,9 @@ begin
     sbResults:
       begin
         if SameText(S, rsResultsCurrent) then
-          aColor := $001DE6B5
+          aColor := config.GoodColor
         else if SameText(S, rsNeedUpdating) then
-          aColor := $000EC9FF
+          aColor := config.WarnColor
         else
           aColor := config.ThemeColor;
         StatusBarFrame.SetPanelColor(Ord(Index), aColor);

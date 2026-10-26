@@ -73,7 +73,7 @@ begin
   with AutoLengthCheckBox do
   begin
     project.AutoLength := Checked;
-    if Checked then Panel1.Color := $00E0FFFF
+    if Checked then Panel1.Color := config.InfoColor
     else Panel1.Color := config.ThemeColor;
   end;
 end;

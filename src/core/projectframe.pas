@@ -564,7 +564,7 @@ begin
   begin
     if (Editor.FirstResultRow > 0) and
       (aRow >= Editor.FirstResultRow) then
-        PropEditor.Canvas.Brush.Color := $00E1FFFF;
+        PropEditor.Canvas.Brush.Color := config.InfoColor;
   end;
 end;
 

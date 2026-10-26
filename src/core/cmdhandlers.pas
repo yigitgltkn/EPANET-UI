@@ -21,6 +21,7 @@ unit cmdhandlers;
    get_results       - returns node or link values for a theme
    export_geojson    - writes the network and its results to GeoJSON files
    set_3d_view       - shows the 3D view of the network or of one valve
+   show_report       - shows one of the program's reports
    apply_edits       - changes junction and pipe properties, e.g. ones
                        edited in QGIS
 }
@@ -38,8 +39,8 @@ implementation
 
 uses
   Forms, Math, StrUtils, StdCtrls, ComCtrls,
-  main, mainmenu, mapviewerframe, view3dframe, project, results, mapthemes,
-  simulator, epanet2, cmdserver, resourcestrings;
+  main, mainmenu, mapviewerframe, view3dframe, reportframe, project, results,
+  mapthemes, simulator, epanet2, cmdserver, resourcestrings;
 
 const
   DefRowLimit = 50;
@@ -1238,6 +1239,41 @@ begin
   end;
 end;
 
+function ShowReport(Params: TJSONObject): TJSONObject;
+//
+//  Parameters:
+//    type   status, pumping, calibration, nodes, links, time_series, profile,
+//           system_flow, energy, variability or fire_flow. Time series,
+//           profile and variability reports first ask in EPANET-UI what to
+//           report.
+//
+const
+  Names: array[rtStatus..rtFireFlow] of string =
+    ('status', 'pumping', 'calibration', 'nodes', 'links', 'time_series',
+     'profile', 'system_flow', 'energy', 'variability', 'fire_flow');
+var
+  Name: string;
+  RptType: TReportType;
+begin
+  CheckReady;
+  Name := Params.Get('type', '');
+  for RptType := rtStatus to rtFireFlow do
+    if SameText(Name, Names[RptType]) then
+    begin
+      if (RptType <> rtStatus) and not project.HasResults then
+        raise Exception.Create('no simulation results are available; ' +
+          'run an analysis first');
+      MainForm.ReportFrame.ShowReport(RptType);
+      Result := TJSONObject.Create;
+      Result.Add('report', Names[RptType]);
+      Result.Add('showing', MainForm.Notebook1.PageIndex = 1);
+      exit;
+    end;
+  raise Exception.CreateFmt('unknown report type "%s"; one of: %s',
+    [Name, 'status, pumping, calibration, nodes, links, time_series, ' +
+    'profile, system_flow, energy, variability, fire_flow']);
+end;
+
 function ExecuteCommand(const CmdType: string; Params: TJSONObject): TJSONData;
 begin
   if SameText(CmdType, 'ping') then
@@ -1261,6 +1297,8 @@ begin
     Result := ExportGeoJson(Params)
   else if SameText(CmdType, 'set_3d_view') then
     Result := Set3DView(Params)
+  else if SameText(CmdType, 'show_report') then
+    Result := ShowReport(Params)
   else if SameText(CmdType, 'apply_edits') then
     Result := ApplyEdits(Params)
   else

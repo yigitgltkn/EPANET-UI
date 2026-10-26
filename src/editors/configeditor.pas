@@ -28,9 +28,10 @@ type
     CheckBox4: TCheckBox;
     CheckBox5: TCheckBox;
     CheckBox6: TCheckBox;
-    CheckBox7: TCheckBox;
     CheckBox8: TCheckBox;
     Label1:    TLabel;
+    ThemeLabel: TLabel;
+    ThemeCombo: TComboBox;
     OkBtn:     TButton;
     CancelBtn: TButton;
     HelpBtn:   TButton;
@@ -44,8 +45,7 @@ type
   private
 
   public
-    ChangeColorTheme: Boolean;
-    procedure GetPreferences(var ClearFileList: Boolean);
+    procedure GetPreferences(var ClearFileList: Boolean; var NewTheme: Integer);
     procedure SetPreferences;
 
   end;
@@ -75,6 +75,7 @@ begin
   CheckBox5.Checked := config.OpenLastFile;
   CheckBox6.Checked := config.BackupFile;
   SpinEdit1.Value   := config.DecimalPlaces;
+  ThemeCombo.ItemIndex := config.NextTheme;
 end;
 
 procedure TConfigForm.HelpBtnClick(Sender: TObject);
@@ -82,7 +83,8 @@ begin
   MainForm.ViewHelp('#program_preferences');
 end;
 
-procedure TConfigForm.GetPreferences(var ClearFileList: Boolean);
+procedure TConfigForm.GetPreferences(var ClearFileList: Boolean;
+  var NewTheme: Integer);
 begin
   config.MapHiliter       := CheckBox1.Checked;
   config.MapHinting       := CheckBox2.Checked;
@@ -91,7 +93,7 @@ begin
   config.OpenLastFile     := CheckBox5.Checked;
   config.BackupFile       := CheckBox6.Checked;
   config.DecimalPlaces    := SpinEdit1.Value;
-  ChangeColorTheme        := CheckBox7.Checked;
+  NewTheme                := ThemeCombo.ItemIndex;
   ClearFileList           := CheckBox8.Checked;
 end;
 

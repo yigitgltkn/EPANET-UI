@@ -111,7 +111,7 @@ begin
   EpsgHelpViewer.DefFontSize := config.FontSize;
   EpsgHelpViewer.DefBackground := $00E0FFFF;
   EpsgHelpViewer.LoadFromString(EpsgHelp);
-  EpsgHelpClosePanel.Color := $00E0FFFF;
+  EpsgHelpClosePanel.Color := config.InfoColor;
 end;
 
 procedure TBasemapMenuForm.Setup;
